@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { cartTotal, isFreeShipping, shippingFee } from "./index.js";
 
 describe("cartTotal", () => {
@@ -46,5 +46,21 @@ describe("shippingFee", () => {
 
   it("charges nothing when shipping is free", () => {
     expect(shippingFee({ total: 600_000, isVip: false, isExpress: false })).toBe(0);
+  });
+});
+
+// (total >= 500,000 OR VIP) AND NOT express: three booleans, eight rows.
+describe("isFreeShipping: every combination", () => {
+  test.each([
+    { total: 400_000, isVip: false, isExpress: false, expected: false },
+    { total: 400_000, isVip: false, isExpress: true, expected: false },
+    { total: 400_000, isVip: true, isExpress: false, expected: true },
+    { total: 400_000, isVip: true, isExpress: true, expected: false },
+    { total: 600_000, isVip: false, isExpress: false, expected: true },
+    { total: 600_000, isVip: false, isExpress: true, expected: false },
+    { total: 600_000, isVip: true, isExpress: false, expected: true },
+    { total: 600_000, isVip: true, isExpress: true, expected: false },
+  ])("total=$total vip=$isVip express=$isExpress -> $expected", ({ expected, ...input }) => {
+    expect(isFreeShipping(input)).toBe(expected);
   });
 });
