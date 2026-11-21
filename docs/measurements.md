@@ -102,13 +102,13 @@ Exhibit pull requests (label `exhibit`):
 
 ## Testing
 
-Measured 2026-11-21 (runs between 22:39Z and 22:43Z) on the commits of pull request [#4](https://github.com/jsiovn/cicd-pipeline/pull/4), before it was rebase-merged (the merge rewrites the SHAs, so commits are named by subject below). Outputs are copied from the GitHub Actions logs with the timestamp prefix removed; the `coverage` and `coverage-trap` jobs run with `NO_COLOR=1`.
+Measured 2026-11-21 (runs between 22:39Z and 22:43Z) on the commits of pull request [#4](https://github.com/jsiovn/cicd-pipeline/pull/4), before it was rebase-merged (the merge rewrites the SHAs, so commits are named by subject below). Outputs are copied from the GitHub Actions logs with the timestamp prefix removed; the `coverage` and `coverage-trap` jobs run with `NO_COLOR=1`. Where a block is marked as an excerpt, lines were left out (said each time); nothing was reworded.
 
 Versions: `vitest` 5.1.1, `@vitest/coverage-v8` 5.1.1, `msw` 3.0.7; the `coverage`, `coverage-trap` and `test-shard` jobs ran on Node v26.13.1 (`actions/setup-node@v7`, `node-version: 26`); the `test` matrix on 22, 24 and 26.
 
 ### Regression test: red, then green
 
-`test: reproduce bug #412, quantity 0 makes the cart total NaN` was pushed alone and its run failed for the stated reason (`test (22)`, `test (24)`, `test (26)` failure, `build` skipped, `ci-ok` failure). From the `test (22)` log:
+`test: reproduce bug #412, quantity 0 makes the cart total NaN` was pushed alone and its run failed for the stated reason (`test (22)`, `test (24)`, `test (26)` failure, `build` skipped, `ci-ok` failure). Excerpt of the `test (22)` log (the passing tests, the code frame and the timing lines left out):
 
 ```text
    × bug #412: quantity = 0 must not break the total 4ms
@@ -186,7 +186,7 @@ Each demo also prints Vitest's run header (`RUN  v5.1.1 …/examples/coverage-tr
 
 ### Shards (`test-shard` job)
 
-`npx vitest run --shard=${{ matrix.shard }}/2` splits by test file, not by test: with two files, each leg runs one file. `test-shard (1)`:
+`npx vitest run --shard=${{ matrix.shard }}/2` splits by test file, not by test: with two files, each leg runs one file. Which leg gets which file is decided by Vitest, not by this repo. On this run, `test-shard (1)` (excerpt: ANSI colour codes stripped, `Start at` and `Duration` lines left out):
 
 ```text
  RUN  v5.1.1 /home/runner/work/cicd-pipeline/cicd-pipeline
@@ -197,7 +197,7 @@ Each demo also prints Vitest's run header (`RUN  v5.1.1 …/examples/coverage-tr
       Tests  2 passed (2)
 ```
 
-`test-shard (2)`:
+`test-shard (2)` (same excerpt rules):
 
 ```text
  RUN  v5.1.1 /home/runner/work/cicd-pipeline/cicd-pipeline
@@ -208,7 +208,7 @@ Each demo also prints Vitest's run header (`RUN  v5.1.1 …/examples/coverage-tr
       Tests  18 passed (18)
 ```
 
-Asking for more shards than there are test files is an error, not an empty leg. Local run, 2026-11-22, Node v22.23.1, `npx vitest run --shard=1/4` (the same for 2/4, 3/4 and 4/4), exit code 1:
+Asking for more shards than there are test files is an error, not an empty leg (unless `--passWithNoTests` is set: Vitest skips this check then). Local run, 2026-11-22, Node v22.23.1, `npx vitest run --shard=1/4` (the same for 2/4, 3/4 and 4/4), exit code 1:
 
 ```text
 ⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
@@ -219,9 +219,9 @@ Error: --shard <count> must be a smaller than count of test files. Resolved 2 te
 
 ### CI flags (Testing post 8.1)
 
-- `--reporter=github-actions` does not have to be passed. Vitest 5 docs (guide › Reporters › Default Configuration): with no `reporters` configured, `github-actions` is added when `process.env.GITHUB_ACTIONS === 'true'`; configuring reporters replaces that default list, so `--reporter=github-actions` alone would drop the normal terminal output. Real run: the red commit's `test (22)` job ran plain `vitest run` (`npm test`, no flag) and its check run carries the annotation `src/pricing/pricing.test.ts:70`, title `src/pricing/pricing.test.ts > bug #412: quantity = 0 must not break the total`, message `AssertionError: expected NaN to be +0 // Object.is equality` (read with `gh api repos/jsiovn/cicd-pipeline/check-runs/<id>/annotations`); the log shows it as `##[error]AssertionError: expected NaN to be +0 // Object.is equality`.
+- `--reporter=github-actions` does not have to be passed. Vitest 5 docs (guide › Reporters › Default Configuration): with no `reporters` configured, `github-actions` is added when `process.env.GITHUB_ACTIONS === 'true'`; configuring reporters replaces that default list, so `--reporter=github-actions` alone drops the normal terminal output. Local check, 2026-11-22, Node v22.23.1: `GITHUB_ACTIONS=true NO_COLOR=1 npx vitest run --reporter=github-actions` on this suite (all 20 tests passing) printed nothing at all and exited 0. Real run: the red commit's `test (22)` job ran plain `vitest run` (`npm test`, no flag) and its check run carries the annotation `src/pricing/pricing.test.ts:70`, title `src/pricing/pricing.test.ts > bug #412: quantity = 0 must not break the total`, message `AssertionError: expected NaN to be +0 // Object.is equality` (read with `gh api repos/jsiovn/cicd-pipeline/check-runs/<id>/annotations`); the log shows it as `##[error]AssertionError: expected NaN to be +0 // Object.is equality`.
 - `--bail=1` is not used here. `vitest --help`: "Stop test execution when given number of tests have failed (default: 0)". A pull-request run should list every failure at once, and this suite finishes in under a second; bail only pays off on long suites where the first failure is enough to reject the change.
-- Local runs differ from CI: Vitest 5 detects AI coding agents (`std-env` `isAgent`) and then uses the `minimal` reporter and adds `skipFull` plus `text-summary` to the `text` coverage reporter. All outputs above come from GitHub Actions, where neither applies.
+- Local runs differ from CI: Vitest 5 detects AI coding agents (`std-env` `isAgent`) and then uses the `minimal` reporter and adds `skipFull` plus `text-summary` to the `text` coverage reporter. All outputs above come from GitHub Actions, where neither applies. With an agent variable set (`CLAUDECODE=1 npm run demo:coverage-gap`, local, 2026-11-22) the `rating.js` row disappears from the table and a `Coverage summary` block (Lines 50% ( 2/4 )) follows it.
 
 ### Post says / reality
 
@@ -230,10 +230,10 @@ The teaching points hold on Vitest 5 and MSW 3: one test gives 100% coverage whi
 | Post section | Post says | Reality (Vitest 5.1.1 / MSW 3.0.7) |
 | --- | --- | --- |
 | 5.1 | Run with Vitest 4.1.10 | Vitest 5.1.1 prints the same `Coverage summary` block, numbers identical (3/3, 0/0, 2/2, 2/2). That block is the `text-summary` reporter; the default `text` reporter prints a table instead, so the demo passes `--coverage.reporter=text-summary`. A ` % Coverage report from v8` line precedes it |
-| 5.2 | Table has `All files` and `shipping.js` rows only | The real table also has a `rating.js` row (100 / 100 / 100 / 100) between them; the `All files` (50 / 0 / 66.66 / 50) and `shipping.js` (`2-3`) rows match |
+| 5.2 | Table has `All files` and `shipping.js` rows only | In a normal terminal and on CI the table also has a `rating.js` row (100 / 100 / 100 / 100) between them; the `All files` (50 / 0 / 66.66 / 50) and `shipping.js` (`2-3`) rows match. The post's exact table is what Vitest 5 prints when it detects an AI coding agent (`skipFull` hides files at 100%; see CI flags above) |
 | 5.3 | `ERROR: Coverage for lines (50%) does not meet global threshold (80%)`, exit code 1 | Identical text and exit code 1 |
 | 3.3 | `cartTotal([{ price: 100_000, quantity: 0 }])`, `import { cartTotal } from "./cart"` | The repo's line item is `{ sku, unitPrice, quantity }` and the import is `./index.js` (ESM with `nodenext` needs the extension); the defect really produced `NaN` (`expected NaN to be +0`) |
-| 6.2 | MSW 2.15.0; `http`, `HttpResponse` from `"msw"`, `setupServer` from `"msw/node"`, `server.listen()` | Unchanged in MSW 3.0.7: the same imports work (MSW 3 also adds a `msw/http` entry point, used in its README). The `listen()` option is renamed: `onUnhandledRequest` is now `onUnhandledFrame` (the old name is a TypeScript error, TS2353). The post does not pass the option, so its snippet runs as printed |
+| 6.2 | MSW 2.15.0; `http`, `HttpResponse` from `"msw"`, `setupServer` from `"msw/node"`, `server.listen()` | Unchanged in MSW 3.0.7: the same imports work. MSW 3 also exports `msw/http` (used in its README); 2.15.0 exported `msw/core/http` instead. The `listen()` option is renamed: `onUnhandledRequest` is now `onUnhandledFrame` (the old name is a TypeScript error, TS2353). The post does not pass the option, so its snippet runs as printed |
 | 8.1 | Enable `vitest run --reporter=github-actions` on CI | Already active under GitHub Actions without the flag; passing it replaces the default reporter (see CI flags above) |
 | 8.1 | `vitest run --bail=1` is worth enabling on CI | Not a sensible default for pull-request runs (see CI flags above) |
 | 8.1 | `vitest run --shard=1/4` | Shards split by test file, and the count may not exceed the number of test files: in this repo (2 test files) `--shard=1/4` fails with exit code 1 (see Shards above). Fine on a suite with 4 or more files |
