@@ -15,6 +15,7 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "demo:coverage-100": "vitest run --root examples/coverage-trap --coverage --coverage.include=rating.js --coverage.reporter=text-summary",
     "demo:coverage-gap": "vitest run --root examples/coverage-trap --coverage --coverage.reporter=text --coverage.thresholds.lines=0",
     "demo:coverage-threshold": "vitest run --root examples/coverage-trap --coverage --coverage.reporter=text"
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/node": "^22.20.5",
