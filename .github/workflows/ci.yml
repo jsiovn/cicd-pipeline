@@ -42,6 +42,86 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # Same suite as `test`, split in two: each leg runs about half the test files.
+  test-shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run --shard=${{ matrix.shard }}/2
+
+  # Fails when coverage drops below the thresholds in vitest.config.ts.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: vitest run --coverage
+        # An explicit `shell: bash` adds -o pipefail, so tee keeps vitest's exit code.
+        shell: bash
+        run: npx vitest run --coverage 2>&1 | tee coverage.txt
+      - name: Coverage table to the job summary
+        if: always() && hashFiles('coverage.txt') != ''
+        run: |
+          {
+            echo '### Coverage'
+            echo '```text'
+            sed -n '/Coverage report from/,$p' coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # examples/coverage-trap: 100% coverage that is still wrong, the uncovered
+  # lines table, and a threshold that fails. Each demo must exit as expected.
+  coverage-trap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Run the three demos and check their exit codes
+        run: |
+          status=0
+          for demo in coverage-100:0 coverage-gap:0 coverage-threshold:1; do
+            name=${demo%:*}
+            want=${demo#*:}
+            got=0
+            npm run -s "demo:$name" > "$name.txt" 2>&1 || got=$?
+            cat "$name.txt"
+            {
+              echo "### npm run demo:$name (exit code $got, expected $want)"
+              echo '```text'
+              cat "$name.txt"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$got" != "$want" ]; then
+              echo "::error::demo:$name exited with $got, expected $want"
+              status=1
+            fi
+          done
+          exit "$status"
+
   build:
     needs: [lint, test]
     runs-on: ubuntu-latest
@@ -59,7 +139,7 @@ jobs:
   # renamed jobs come and go; this name stays. if: always() makes it report
   # even when a needed job failed or was skipped, so it never stays pending.
   ci-ok:
-    needs: [lint, test, build]
+    needs: [lint, test, test-shard, coverage, coverage-trap, build]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
