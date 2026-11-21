@@ -302,3 +302,81 @@ Here the restore was clearly faster than the download (3s vs about 8s), so the f
 | Testing 7.2 | Playwright 1.61.1 | 1.65.1 is current; [`e2e/checkout.spec.ts`](../e2e/checkout.spec.ts) is the post's snippet unchanged and passes against `GET /checkout` |
 | Testing 7.2 | Config: `fullyParallel: true`, `forbidOnly: !!process.env.CI`, `retries: process.env.CI ? 2 : 0`, `use.trace: "on-first-retry"` | All four are written exactly so in the current docs. The docs' CI page also sets `workers: process.env.CI ? 1 : undefined` (left out here: one test), and the config `npm init playwright` generates sets `reporter: "html"`. A runnable config also needs `baseURL` (for `page.goto("/checkout")`) and `webServer` (to start the app): [`playwright.config.ts`](../playwright.config.ts) adds both, plus a `list` reporter so the log shows `1 passed` / `1 flaky` |
 | CI/CD 3.2 | `actions/cache@v6`, `key: ${{ runner.OS }}-…`, `restore-keys` prefix | Exact `key` match measured above (`Cache hit for: Linux-playwright-1.65.1`). The `restore-keys` fallback (newest entry matching the prefix) is the behaviour the `actions/cache` README (latest v6.1.0) describes; no run here exercised it. The job writes `runner.os`; expressions are case-insensitive, so `runner.OS` gives the same `Linux` |
+
+## Docker images
+
+Measured 2026-11-21 (job start 23:22 UTC) by job `sizes` of [`.github/workflows/image.yml`](../.github/workflows/image.yml) on pull request [#6](https://github.com/jsiovn/cicd-pipeline/pull/6), head commit `dfb866b` (`build: measure unpacked image size from the docker history layers`; `GITHUB_SHA` = test merge commit `190a165`). The job runs [`docker/sizes.sh`](../docker/sizes.sh); the numbers below are copied from the `sizes.json` artifact it uploaded.
+
+Runner: `ubuntu-latest`, Docker `29.4.2` (server), `github.com/docker/buildx v0.39.0 360040a78d6113dc84e5d4dcdf0f438e1be7a41f`, Buildx `docker-container` driver from `docker/setup-buildx-action@v4`, `linux/amd64`.
+
+Node major: **26** for every variant. Node 26 is the Active LTS since 2026-10-28, and every base image exists for it: `node:26`, `node:26-slim` (Debian 13 trixie), `node:26-alpine` and `gcr.io/distroless/nodejs26-debian13`. Distroless has no Debian 12 image for Node 26 (`gcr.io/distroless/nodejs26-debian12` lists no tags), so the distroless variant uses Debian 13 — the same Debian release as the `-slim` stages that install its `node_modules`, so the glibc that the bcrypt prebuild links against matches. `docker history` of the production image shows `ENV NODE_VERSION=26.13.1`.
+
+### Sizes
+
+"Size" is the unpacked size: the sum of the layer sizes `docker history --human=false` reports, which is the number the classic `docker images` SIZE column showed. Docker 29 on the runner uses the containerd image store, where the SIZE column of `docker image ls` is disk usage (unpacked layers plus the compressed blobs) and `docker image inspect .Size` is the compressed content size; both are recorded too. "Compressed" is what `docker pull` downloads.
+
+| Variant | Dockerfile | Base image | Base size | Final size | Base compressed | Final compressed | `docker image ls` SIZE (base / final) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| naive | [`docker/Dockerfile.naive`](../docker/Dockerfile.naive) | `node:26` | 1.34GB | 1.59GB | 445MB | 547MB | 1.8GB / 2.14GB |
+| ordered | [`docker/Dockerfile.ordered`](../docker/Dockerfile.ordered) | `node:26` | 1.34GB | 1.59GB | 445MB | 547MB | 1.8GB / 2.13GB |
+| multi-stage slim (production) | [`Dockerfile`](../Dockerfile) | `node:26-slim` | 267MB | 277MB | 85.8MB | 87.4MB | 355MB / 365MB |
+| alpine | [`docker/Dockerfile.alpine`](../docker/Dockerfile.alpine) | `node:26-alpine` | 188MB | 198MB | 63MB | 64.6MB | 252MB / 263MB |
+| distroless | [`docker/Dockerfile.distroless`](../docker/Dockerfile.distroless) | `gcr.io/distroless/nodejs26-debian13` | 183MB | 193MB | 60.3MB | 61.9MB | 243MB / 255MB |
+
+Exact bytes (unpacked final / compressed final): naive 1588006912 / 546996529; ordered 1587855360 / 546956620; multi 277229568 / 87370638; alpine 198365184 / 64572268; distroless 192839680 / 61891085. Bases (unpacked / compressed): `node:26` 1337987072 / 444907171; `node:26-slim` 267239424 / 85764794; `node:26-alpine` 188375040 / 62963592; distroless 182849536 / 60282348.
+
+What the numbers say:
+
+- Multi-stage on `-slim` is 1.59GB → 277MB unpacked against the naive image (5.7 times smaller), 547MB → 87.4MB compressed.
+- naive and ordered are the same size: the order of `COPY` changes cache reuse, not the content.
+- On top of its base, the production image adds 10MB (277MB − 267MB): production `node_modules`, `dist/` and `package.json`. The naive image adds 250MB on top of `node:26`: all dependencies with devDependencies, the source and the build output.
+- alpine and distroless are 79MB and 84MB smaller than slim, all of it base image; the app layers are the same 10MB.
+
+### node_modules
+
+From the two install stages of [`Dockerfile`](../Dockerfile), built on their own (`--target deps`, `--target prod-deps`) and measured with `du -sh /app/node_modules`:
+
+| Stage | `npm ci` line (from the build log) | `du -sh node_modules` |
+| --- | --- | --- |
+| `deps` (`npm ci`, with devDependencies) | `added 299 packages, and audited 300 packages in 4s` | 181M |
+| `prod-deps` (`npm ci --omit=dev`) | `added 94 packages, and audited 95 packages in 1s` | 9.5M |
+
+The production `node_modules` layer in `docker history` below is 9.93MB (the history column counts the layer on disk, so it is a little larger than `du`).
+
+### docker history of the production image
+
+`docker history --format '{{.Size}}\t{{.CreatedBy}}' orders-api:multi`, verbatim (the `CREATED BY` column is truncated by Docker):
+
+```text
+0B	CMD ["node" "dist/server.js"]
+0B	HEALTHCHECK {Test:[CMD-SHELL node -e "fetch(…
+0B	EXPOSE 3000/tcp
+0B	USER node
+12.3kB	COPY --chown=node:node package.json ./ # bui…
+41kB	COPY --chown=node:node /app/dist ./dist # bu…
+9.93MB	COPY --chown=node:node /app/node_modules ./n…
+8.19kB	WORKDIR /app
+0B	ENV NODE_ENV=production
+0B	CMD ["node"]
+0B	ENTRYPOINT ["docker-entrypoint.sh"]
+20.5kB	COPY docker-entrypoint.sh /usr/local/bin/ # …
+179MB	RUN /bin/sh -c ARCH= OPENSSL_ARCH= && dpkgAr…
+0B	ENV NODE_VERSION=26.13.1
+69.6kB	RUN /bin/sh -c groupadd --gid 1000 node   &&…
+87.7MB	# debian.sh --arch 'amd64' out/ 'trixie' '@1…
+```
+
+Read from the bottom: Debian 13 base 87.7MB, Node runtime 179MB, then this repo's layers: `node_modules` 9.93MB, `dist` 41kB, `package.json` 12.3kB (small files are rounded up to whole filesystem blocks in this column). The same script started the image and got `{"status":"ok","uptime":0}` from `GET /healthz`.
+
+### Post says / reality (Docker images)
+
+| Post section | Post says (written for Node 24) | Reality (Node 26, this run) |
+| --- | --- | --- |
+| Docker 1.1 | 221 packages | `npm ci` adds 299 packages (this repo also carries Vitest, Playwright, MSW, ESLint and TypeScript as devDependencies) |
+| Docker 2.2 | naive 1.26GB, multi 275MB; `node:24` 1.13GB, `node:24-slim` 227MB | naive 1.59GB, multi 277MB; `node:26` 1.34GB, `node:26-slim` 267MB |
+| Docker 2.2 | `node_modules` 48.5MB production, 132MB with devDependencies; `dist` 1.27kB | 9.93MB layer (9.5M `du`) production, 181M with devDependencies; `dist` 41kB |
+| Docker 3 | alpine base 164MB / final 213MB; distroless (`nodejs24-debian12`) 146MB / 195MB | alpine 188MB / 198MB; distroless (`nodejs26-debian13`) 183MB / 193MB |
+
+### Published image
+
+Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main` (and on a manual run on `main`); pull requests only run `sizes`. Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.

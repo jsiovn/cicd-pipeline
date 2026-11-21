@@ -1,0 +1,70 @@
+name: Image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/jsiovn/cicd-pipeline
+
+jobs:
+  # Builds all five Dockerfiles and measures them: job summary + sizes.json.
+  sizes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - run: bash docker/sizes.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sizes
+          path: sizes.json
+          retention-days: 90
+
+  # Publishes the production image (root Dockerfile). main only: a pull request
+  # builds and measures, it never pushes.
+  publish:
+    needs: sizes
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Tags: main, sha-<short>. Labels include org.opencontainers.image.source,
+      # which links the package to this repository.
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: docker buildx imagetools inspect
+        run: docker buildx imagetools inspect "$IMAGE:main"
