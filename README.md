@@ -1,5 +1,7 @@
 # cicd-pipeline
 
+[![CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml)
+
 One small Node.js "orders" API taken through PR checks, tests, Docker images and deploys with GitHub Actions. The app is deliberately tiny: the pipeline around it is the product.
 
 It backs these articles on [JavaScript.io.vn](https://javascript.io.vn/) (in Vietnamese):
