@@ -25,6 +25,7 @@ export const EXPRESS_SHIPPING_FEE = 50_000;
 export function cartTotal(items: LineItem[]): number {
   let total = 0;
   for (const item of items) {
+    if (item.quantity === 0) continue; // bug #412: 0 / 0 is NaN
     const lineTotal = item.unitPrice * item.quantity - (item.discount ?? 0);
     const pricePerUnit = Math.round(lineTotal / item.quantity);
     total += pricePerUnit * item.quantity;
