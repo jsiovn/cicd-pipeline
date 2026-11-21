@@ -1,5 +1,6 @@
 import express from "express";
 import type { Logger } from "pino";
+import { checkoutPage } from "./checkout-page.js";
 import { cartTotal, shippingFee, type LineItem } from "./pricing/index.js";
 
 interface OrderRequest {
@@ -14,6 +15,10 @@ export function createApp(logger: Logger) {
 
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
+  });
+
+  app.get("/checkout", (_req, res) => {
+    res.type("html").send(checkoutPage);
   });
 
   app.post("/orders", (req, res) => {
