@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1
+# Docker post 4.2: the token is mounted for this one RUN and never stored in a
+# layer or in the history.
+FROM node:26-slim
+WORKDIR /app
+RUN --mount=type=secret,id=npm_token \
+    echo "//registry.npmjs.org/:_authToken=$(cat /run/secrets/npm_token)" > .npmrc \
+ && npm config get registry \
+ && rm .npmrc

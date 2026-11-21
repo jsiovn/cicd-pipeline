@@ -1,0 +1,10 @@
+# Rules for `dive` in CI mode (CI=true), used by the dive job of
+# .github/workflows/docker-lab.yml. The job fails when a rule fails.
+rules:
+  # Below this share of non-wasted bytes, fail. Ratio 0-1.
+  lowestEfficiency: 0.95
+  # More wasted space than this (files written in one layer, then replaced or
+  # deleted by a later one), fail.
+  highestWastedBytes: 20MB
+  # Wasted space as a share of the image without its base layer. Ratio 0-1.
+  highestUserWastedPercent: 0.10

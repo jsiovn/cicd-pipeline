@@ -1,0 +1,9 @@
+# Docker post 4.1 — DO NOT COPY: the token passed with --build-arg ends up in
+# the image history even though .npmrc is deleted. The lab builds it with a
+# fake token only (npm_FAKE_TOKEN_DO_NOT_USE).
+FROM node:26-slim
+ARG NPM_TOKEN
+WORKDIR /app
+RUN echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc \
+ && npm config get registry \
+ && rm .npmrc

@@ -380,3 +380,395 @@ Read from the bottom: Debian 13 base 87.7MB, Node runtime 179MB, then this repo'
 ### Published image
 
 Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main` (and on a manual run on `main`); pull requests only run `sizes`. Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.
+
+## Docker lab (build-time)
+
+Measured 2026-11-21 (jobs started 23:42 UTC) by run `44963084906` of [`.github/workflows/docker-lab.yml`](../.github/workflows/docker-lab.yml) on pull request [#7](https://github.com/jsiovn/cicd-pipeline/pull/7), head commit `78481cf` (`ci: keep lab logs out of the build context, strip colour codes, one line per build step`). Each job runs one script in [`docker/lab/`](../docker/lab) (the next commit, `ci: tighten the lab assertions`, only adds checks to the scripts; the outputs are unchanged); everything below is copied from the artifacts it uploaded (`lab-layer-cache`, `lab-build-context`, `lab-base-images`, `lab-secrets`, `lab-dive`). Lines starting with `$` are the commands, `# ----` lines are the script's own headings, `[exit N]` marks a non-zero exit code. Terminal colour codes are stripped.
+
+Runner: `ubuntu-latest`, `Docker server 29.4.2, client 29.4.2`, `github.com/docker/buildx v0.39.0 360040a78d6113dc84e5d4dcdf0f438e1be7a41f`, `Driver: docker`, `BuildKit version: v0.29.0` (the BuildKit built into dockerd; this workflow does not use `setup-buildx-action`), `linux/amd64`, the Node 26 base images of [Docker images](#docker-images).
+
+### Layer cache: one-line change, then rebuild (post 1.1, 1.2)
+
+Job `layer-cache`, [`docker/lab/layer-cache.sh`](../docker/lab/layer-cache.sh). Each Dockerfile is built once to fill the cache, then one line of `src/server.ts` changes and it is rebuilt with `--progress=plain`. The script prints each `[n/m]` step with its final `DONE` / `CACHED` line; `TOTAL` is the wall time of the whole `docker build` command (the full plain logs are in the artifact).
+
+The change:
+
+```text
+$ git diff -U0 -- src/server.ts
+diff --git a/src/server.ts b/src/server.ts
+index 08afdbf..368593d 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -13 +13 @@ const server = app.listen(port, (error) => {
+-  logger.info(`listening on ${port}`);
++  logger.info(`listening on port ${port}`);
+```
+
+[`docker/Dockerfile.naive`](../docker/Dockerfile.naive), rebuild:
+
+```text
+# ---- naive: rebuild after the one-line change ----
+$ docker build --progress=plain -f docker/Dockerfile.naive -t lab:naive .
+#4 [1/5] FROM docker.io/library/node:26@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
+#4 DONE 0.0s
+#6 [2/5] WORKDIR /app
+#6 CACHED
+#7 [3/5] COPY . .
+#7 DONE 1.5s
+#8 [4/5] RUN npm install
+#8 DONE 3.3s
+#9 [5/5] RUN npm run build
+#9 DONE 2.5s
+TOTAL 16.13 s (wall time of docker build)
+```
+
+[`docker/Dockerfile.ordered`](../docker/Dockerfile.ordered), rebuild:
+
+```text
+# ---- ordered: rebuild after the one-line change ----
+$ docker build --progress=plain -f docker/Dockerfile.ordered -t lab:ordered .
+#4 [1/6] FROM docker.io/library/node:26@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
+#4 DONE 0.0s
+#6 [2/6] WORKDIR /app
+#6 CACHED
+#7 [3/6] COPY package.json package-lock.json ./
+#7 CACHED
+#8 [4/6] RUN npm ci
+#8 CACHED
+#9 [5/6] COPY . .
+#9 DONE 1.3s
+#10 [6/6] RUN npm run build
+#10 DONE 0.8s
+TOTAL 2.66 s (wall time of docker build)
+```
+
+The first (cache-filling) builds, for reference:
+
+```text
+# ---- naive (docker/Dockerfile.naive): first build, fills the cache ----
+$ docker build --progress=plain -f docker/Dockerfile.naive -t lab:naive .
+#6 [1/5] FROM docker.io/library/node:26@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
+#6 DONE 10.8s
+#7 [2/5] WORKDIR /app
+#7 DONE 8.6s
+#8 [3/5] COPY . .
+#8 DONE 0.0s
+#9 [4/5] RUN npm install
+#9 DONE 5.1s
+#10 [5/5] RUN npm run build
+#10 DONE 1.1s
+TOTAL 36.28 s (wall time of docker build)
+
+# ---- ordered (docker/Dockerfile.ordered): first build, fills the cache ----
+$ docker build --progress=plain -f docker/Dockerfile.ordered -t lab:ordered .
+#4 [1/6] FROM docker.io/library/node:26@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
+#4 DONE 0.0s
+#5 [2/6] WORKDIR /app
+#5 CACHED
+#7 [3/6] COPY package.json package-lock.json ./
+#7 DONE 1.8s
+#8 [4/6] RUN npm ci
+#8 DONE 4.4s
+#9 [5/6] COPY . .
+#9 DONE 0.1s
+#10 [6/6] RUN npm run build
+#10 DONE 0.8s
+TOTAL 15.63 s (wall time of docker build)
+```
+
+What it shows: the naive rebuild re-runs `RUN npm install` (`DONE 3.3s`) because `COPY . .` above it changed; the ordered rebuild reports `COPY package.json package-lock.json ./` and `RUN npm ci` as `CACHED` and re-runs only `COPY . .` and the build. Wall time 16.13 s against 2.66 s (6.1 times). Most of the naive 16.13 s is not the install step but writing the image: its full log shows `exporting layers 6.8s done` and `unpacking to docker.io/library/lab:naive 1.5s done`, because every layer from `COPY . .` down, including the reinstalled `node_modules`, is new. The ordered rebuild's export takes `0.1s`.
+
+### Build context with and without `.dockerignore` (post 1.3)
+
+Job `build-context`, [`docker/lab/build-context.sh`](../docker/lab/build-context.sh), run after `npm ci` so `node_modules` exists. The context is exported exactly as the builder receives it (`FROM scratch`, `COPY . /`, `-o type=local`) and measured with **`du -sh` of the exported directory: that is the figure to quote**. BuildKit's own `transferring context` line (bytes sent to the builder; the builder cache is pruned before each build, so the transfer starts empty) is recorded next to it.
+
+```text
+$ du -sh node_modules
+181M	node_modules
+
+# ---- with .dockerignore ----
+$ cat .dockerignore
+node_modules
+dist
+.git
+.env
+.env.*
+Dockerfile*
+.dockerignore
+npm-debug.log
+
+$ docker builder prune -af > /dev/null
+
+$ docker build --progress=plain -f /home/runner/work/_temp/context.Dockerfile -o type=local,dest=/home/runner/work/_temp/context-with-dockerignore . 2>&1 | grep -E 'transferring context|load .dockerignore'
+#2 [internal] load .dockerignore
+#2 transferring context: 115B done
+#3 transferring context: 270.60kB done
+
+$ du -sh /home/runner/work/_temp/context-with-dockerignore
+444K	/home/runner/work/_temp/context-with-dockerignore
+
+$ find /home/runner/work/_temp/context-with-dockerignore -maxdepth 1 -mindepth 1 -printf '%f\n' | sort | tr '\n' ' '
+.dive-ci .editorconfig .gitattributes .github .gitignore .nvmrc README.md docker docs e2e eslint.config.js examples package-lock.json package.json playwright.config.ts src tsconfig.build.json tsconfig.json vitest.config.ts 
+
+# ---- without .dockerignore ----
+$ mv .dockerignore /home/runner/work/_temp/dockerignore.bak
+
+$ docker builder prune -af > /dev/null
+
+$ docker build --progress=plain -f /home/runner/work/_temp/context.Dockerfile -o type=local,dest=/home/runner/work/_temp/context-without-dockerignore . 2>&1 | grep -E 'transferring context|load .dockerignore'
+#2 [internal] load .dockerignore
+#2 transferring context: 2B done
+#3 transferring context: 169.13MB 0.7s done
+
+$ du -sh /home/runner/work/_temp/context-without-dockerignore
+182M	/home/runner/work/_temp/context-without-dockerignore
+
+$ find /home/runner/work/_temp/context-without-dockerignore -maxdepth 1 -mindepth 1 -printf '%f\n' | sort | tr '\n' ' '
+.dive-ci .editorconfig .git .gitattributes .github .gitignore .nvmrc Dockerfile README.md docker docs e2e eslint.config.js examples node_modules package-lock.json package.json playwright.config.ts src tsconfig.build.json tsconfig.json vitest.config.ts 
+
+$ mv /home/runner/work/_temp/dockerignore.bak .dockerignore
+```
+
+| | `du -sh` of the context | BuildKit `transferring context` |
+| --- | --- | --- |
+| without `.dockerignore` | 182M | 169.13MB |
+| with `.dockerignore` | 444K | 270.60kB |
+
+Without the file, `node_modules` (181M), `.git` and `Dockerfile` are in the context; with it, only the source, docs and config files are.
+
+### Base image probes: alpine and distroless (post 3)
+
+Job `base-images`, [`docker/lab/base-images.sh`](../docker/lab/base-images.sh); images built from [`docker/Dockerfile.alpine`](../docker/Dockerfile.alpine) and [`docker/Dockerfile.distroless`](../docker/Dockerfile.distroless).
+
+bcrypt on `node:26-alpine` (the post's snippet):
+
+```text
+$ docker run --rm orders-api:alpine node -e "
+  const bcrypt = require('bcrypt');
+  const h = bcrypt.hashSync('secret', 10);
+  console.log('alpine bcrypt ok:', bcrypt.compareSync('secret', h));
+"
+alpine bcrypt ok: true
+```
+
+The prebuilt binaries bcrypt 6.0.0 ships, the Alpine release, and the toolchain (`which` finds none of `python3`, `make`, `g++`):
+
+```text
+$ docker run --rm orders-api:alpine sh -c 'ls node_modules/bcrypt/prebuilds/; cat /etc/alpine-release; which python3 make g++ || true'
+darwin-arm64
+darwin-x64
+linux-arm
+linux-arm64
+linux-x64
+win32-arm64
+win32-x64
+3.24.4
+```
+
+Forcing a build from source inside the alpine image (plain `node:26-alpine` underneath, no toolchain added), full output:
+
+```text
+$ docker run --rm orders-api:alpine npm rebuild bcrypt --build-from-source
+npm warn Unknown cli config "--build-from-source". This will stop working in the next major version of npm.
+npm error code 1
+npm error path /app/node_modules/bcrypt
+npm error command failed
+npm error command sh -c node-gyp-build
+npm error gyp info it worked if it ends with ok
+npm error gyp info using node-gyp@12.4.0
+npm error gyp info using node@26.13.1 | linux | x64
+npm error gyp ERR! find Python 
+npm error gyp ERR! find Python --python was not set on the command line
+npm error gyp ERR! find Python Python is not set from environment variable PYTHON
+npm error gyp ERR! find Python checking if "python3" can be used
+npm error gyp ERR! find Python - executable path is ""
+npm error gyp ERR! find Python - "" could not be run
+npm error gyp ERR! find Python checking if "python" can be used
+npm error gyp ERR! find Python - executable path is ""
+npm error gyp ERR! find Python - "" could not be run
+npm error gyp ERR! find Python 
+npm error gyp ERR! find Python **********************************************************
+npm error gyp ERR! find Python You need to install the latest version of Python.
+npm error gyp ERR! find Python Node-gyp should be able to find and use Python. If not,
+npm error gyp ERR! find Python you can try one of the following options:
+npm error gyp ERR! find Python - Use the switch --python="/path/to/pythonexecutable"
+npm error gyp ERR! find Python (accepted by both node-gyp and npm)
+npm error gyp ERR! find Python - Set the environment variable PYTHON
+npm error gyp ERR! find Python For more information consult the documentation at:
+npm error gyp ERR! find Python https://github.com/nodejs/node-gyp#installation
+npm error gyp ERR! find Python **********************************************************
+npm error gyp ERR! find Python 
+npm error gyp ERR! configure error 
+npm error gyp ERR! stack Error: Could not find any Python installation to use
+npm error gyp ERR! stack at PythonFinder.fail (/usr/local/lib/node_modules/npm/node_modules/node-gyp/lib/find-python.js:300:11)
+npm error gyp ERR! stack at PythonFinder.findPython (/usr/local/lib/node_modules/npm/node_modules/node-gyp/lib/find-python.js:160:17)
+npm error gyp ERR! stack at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+npm error gyp ERR! stack at async configure (/usr/local/lib/node_modules/npm/node_modules/node-gyp/lib/configure.js:27:18)
+npm error gyp ERR! stack at async run (/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js:81:18)
+npm error gyp ERR! System Linux 7.0.0-1016-aws
+npm error gyp ERR! command "/usr/local/bin/node" "/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js" "rebuild"
+npm error gyp ERR! cwd /app/node_modules/bcrypt
+npm error gyp ERR! node -v v26.13.1
+npm error gyp ERR! node-gyp -v v12.4.0
+npm error gyp ERR! $npm_package_name bcrypt
+npm error gyp ERR! $npm_package_version 6.0.0
+npm error gyp ERR! not ok
+npm notice
+npm notice New major version of npm available! 11.20.0 -> 12.2.3
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.3
+npm notice To update run: npm install -g npm@12.2.3
+npm notice
+npm error A complete log of this run can be found in: /home/node/.npm/_logs/2026-11-21T23_42_46_139Z-debug-0.log
+[exit 1]
+```
+
+The shell probe on distroless:
+
+```text
+$ docker run --rm --entrypoint sh orders-api:distroless -c 'echo hi'
+docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "sh": executable file not found in $PATH
+
+Run 'docker run --help' for more information
+[exit 127]
+```
+
+### Secrets: `ARG` vs secret mount (post 4)
+
+Job `secrets`, [`docker/lab/secrets.sh`](../docker/lab/secrets.sh). The token is fake on purpose, `npm_FAKE_TOKEN_DO_NOT_USE` (25 bytes), and does not match the npm token format.
+
+[`docker/lab/Dockerfile.leaky`](../docker/lab/Dockerfile.leaky) built with `--build-arg NPM_TOKEN=npm_FAKE_TOKEN_DO_NOT_USE`. The build ends with a lint warning:
+
+```text
+1 warning found (use docker --debug to expand):
+ - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "NPM_TOKEN") (line 5)
+```
+
+```text
+$ docker history --no-trunc --format '{{.CreatedBy}}' leaky:demo | head -n 3
+RUN |1 NPM_TOKEN=npm_FAKE_TOKEN_DO_NOT_USE /bin/sh -c echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc  && npm config get registry  && rm .npmrc # buildkit
+WORKDIR /app
+ARG NPM_TOKEN=npm_FAKE_TOKEN_DO_NOT_USE
+
+$ docker history --no-trunc --format '{{.CreatedBy}}' leaky:demo | grep -c npm_FAKE_TOKEN_DO_NOT_USE
+2
+```
+
+[`docker/lab/Dockerfile.safe`](../docker/lab/Dockerfile.safe) built with `--secret id=npm_token,src=<file>`:
+
+```text
+$ docker history --no-trunc --format '{{.CreatedBy}}' safe:demo | head -n 3
+RUN /bin/sh -c echo "//registry.npmjs.org/:_authToken=$(cat /run/secrets/npm_token)" > .npmrc  && npm config get registry  && rm .npmrc # buildkit
+WORKDIR /app
+CMD ["node"]
+
+$ docker history --no-trunc --format '{{.CreatedBy}}' safe:demo | grep -c npm_FAKE_TOKEN_DO_NOT_USE
+0
+[exit 1]
+
+$ docker image inspect safe:demo | grep -c npm_FAKE_TOKEN_DO_NOT_USE
+0
+[exit 1]
+
+$ docker run --rm safe:demo sh -c 'ls -A /app; ls /run/secrets 2>&1'
+ls: cannot access '/run/secrets': No such file or directory
+[exit 2]
+```
+
+The token is in the leaky image's history twice (the `ARG` line and the `RUN |1 NPM_TOKEN=…` line) and nowhere in the safe image: `grep -c` finds 0 lines in its history and 0 in `docker image inspect`; `/app` is empty (`.npmrc` was removed) and `/run/secrets` does not exist in the image.
+
+#### Is `# syntax=docker/dockerfile:1` required for `RUN --mount`?
+
+The same two-line Dockerfile built with and without the directive. `required=true` makes the build fail if the secret is not mounted, and the `RUN` prints the size of what it read:
+
+```text
+$ cat /home/runner/work/_temp/Dockerfile.with-directive
+# syntax=docker/dockerfile:1
+FROM node:26-slim
+RUN --mount=type=secret,id=npm_token,required=true sh -c 'echo "secret mounted: $(wc -c < /run/secrets/npm_token) bytes"'
+
+$ docker build --no-cache --progress=plain --secret id=npm_token,src=/home/runner/work/_temp/npm_token.txt -f /home/runner/work/_temp/Dockerfile.with-directive -t mount:with-directive docker/lab > /home/runner/work/_temp/lab-out/mount-with-directive.log 2>&1; status=$?; grep -E '^#[0-9]+ (\[|resolve image config|docker-image://)|secret mounted: [0-9]|ERROR' /home/runner/work/_temp/lab-out/mount-with-directive.log; exit $status
+#1 [internal] load build definition from Dockerfile.with-directive
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+#4 [internal] load metadata for docker.io/library/node:26-slim
+#5 [internal] load .dockerignore
+#6 [stage-0 1/2] FROM docker.io/library/node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+#7 [stage-0 2/2] RUN --mount=type=secret,id=npm_token,required=true sh -c 'echo "secret mounted: $(wc -c < /run/secrets/npm_token) bytes"'
+#7 0.148 secret mounted: 25 bytes
+
+$ cat /home/runner/work/_temp/Dockerfile.without-directive
+FROM node:26-slim
+RUN --mount=type=secret,id=npm_token,required=true sh -c 'echo "secret mounted: $(wc -c < /run/secrets/npm_token) bytes"'
+
+$ docker build --no-cache --progress=plain --secret id=npm_token,src=/home/runner/work/_temp/npm_token.txt -f /home/runner/work/_temp/Dockerfile.without-directive -t mount:without-directive docker/lab > /home/runner/work/_temp/lab-out/mount-without-directive.log 2>&1; status=$?; grep -E '^#[0-9]+ (\[|resolve image config|docker-image://)|secret mounted: [0-9]|ERROR' /home/runner/work/_temp/lab-out/mount-without-directive.log; exit $status
+#1 [internal] load build definition from Dockerfile.without-directive
+#2 [internal] load metadata for docker.io/library/node:26-slim
+#3 [internal] load .dockerignore
+#4 [stage-0 1/2] FROM docker.io/library/node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+#5 [stage-0 2/2] RUN --mount=type=secret,id=npm_token,required=true sh -c 'echo "secret mounted: $(wc -c < /run/secrets/npm_token) bytes"'
+#5 0.128 secret mounted: 25 bytes
+```
+
+Both builds succeed and both read the 25-byte secret. The build with the directive is also the positive control for `safe:demo` (same frontend, same token file): the secret mount does deliver the token, so its absence from `safe:demo` is not an unmounted secret. With the directive, BuildKit first pulls the `docker/dockerfile:1` frontend image (`resolve image config for docker-image://docker.io/docker/dockerfile:1`); without it, the Dockerfile frontend built into BuildKit v0.29.0 parses the file and handles `RUN --mount=type=secret` itself. On this Docker the directive is **recommended, not required**: it pins the Dockerfile syntax to the latest `1.x` frontend instead of whatever the local BuildKit bundles.
+
+### dive in CI mode (post 7)
+
+Job `dive`, [`docker/lab/dive.sh`](../docker/lab/dive.sh): `docker.io/wagoodman/dive:v0.13.1` (checked by hand on 2026-11-22, not by the job: the latest dive release, published 2025-03-29, also as `ghcr.io/wagoodman/dive`) on the production image built from [`Dockerfile`](../Dockerfile) as `orders-api:multi`, rules in [`.dive-ci`](../.dive-ci) (`lowestEfficiency: 0.95`, `highestWastedBytes: 20MB`, `highestUserWastedPercent: 0.10`; the job fails when a rule fails). The post's command, reading the image through the Docker socket, works against Docker 29 (the script falls back to a `docker save` archive only if it does not):
+
+```text
+$ docker run --rm -e CI=true -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/.dive-ci:/.dive-ci:ro" docker.io/wagoodman/dive:v0.13.1 orders-api:multi --ci-config /.dive-ci
+  Using CI config: /.dive-ci
+Image Source: docker://orders-api:multi
+Extracting image from docker-engine... (this can take a while for large images)
+Analyzing image...
+  efficiency: 99.3056 %
+  wastedBytes: 3503492 bytes (3.5 MB)
+  userWastedPercent: 1.9817 %
+Inefficient Files:
+Count  Wasted Space  File Path
+    2        1.6 MB  /var/cache/debconf/templates.dat-old
+    2        1.6 MB  /var/cache/debconf/templates.dat
+    2        142 kB  /var/lib/dpkg/status-old
+    2        142 kB  /var/lib/dpkg/status
+    2         21 kB  /var/cache/debconf/config.dat-old
+    2        9.8 kB  /var/log/apt/eipp.log.xz
+    2        9.0 kB  /var/lib/apt/extended_states
+    2        8.7 kB  /var/cache/debconf/config.dat
+    2        8.3 kB  /etc/ld.so.cache
+    2        1.7 kB  /etc/passwd
+    2        1.7 kB  /etc/passwd-
+    2         974 B  /etc/shadow
+    2         881 B  /etc/group
+    2         868 B  /etc/group-
+    2         737 B  /etc/gshadow
+    2         436 B  /var/lib/dpkg/diversions-old
+    2         400 B  /var/lib/dpkg/diversions
+    2          18 B  /etc/subuid
+    2          18 B  /etc/subgid
+    2           0 B  /var/lib/dpkg/lock
+    2           0 B  /var/lib/dpkg/triggers/Lock
+    2           0 B  /var/lib/dpkg/triggers/Unincorp
+Results:
+  PASS: highestUserWastedPercent
+  PASS: highestWastedBytes
+  PASS: lowestEfficiency
+Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]
+```
+
+Every inefficient file is in the layers of the base image `node:26-slim` (`apt`/`dpkg`/`debconf` state and `/etc/passwd`-style files written by one base layer and rewritten by a later one); none is under `/app`, so none comes from this repo's layers.
+
+### Post says / reality (Docker lab)
+
+| Post section | Post says (written for Node 24) | Reality (Node 26, this run) |
+| --- | --- | --- |
+| Docker 1.1 | naive rebuild: `RUN npm install` `DONE 4.0s`, `RUN npm run build` `DONE 1.1s`, `TOTAL 6.60 s` | `RUN npm install` re-runs, as the post says: `DONE 3.3s`, build `DONE 2.5s`, `TOTAL 16.13 s`. Most of the total is exporting and unpacking the new layers (`exporting layers 6.8s`, `unpacking … 1.5s`), which the post's step list does not show |
+| Docker 1.1 (note) | 221 packages | `npm ci` installs 299 packages in this repo (see [Docker images](#docker-images)) |
+| Docker 1.2 | ordered rebuild: manifests and `RUN npm ci` `CACHED`, `TOTAL 1.42 s`, 4.6 times faster | `CACHED`, as the post says; `TOTAL 2.66 s`; 16.13 s → 2.66 s = 6.1 times |
+| Docker 1.3 | `du -sh .`: 40M without `.dockerignore`, 68K with it | `du -sh` of the exported context: 182M without, 444K with (BuildKit `transferring context`: 169.13MB vs 270.60kB). This repo carries Vitest, Playwright, MSW, ESLint and TypeScript as devDependencies, so `node_modules` alone is 181M |
+| Docker 3 | `alpine bcrypt ok: true` | identical. bcrypt 6.0.0 ships its binaries in `prebuilds/` (folders listed above, `linux-x64` among them) and loads on Alpine 3.24.4 without a toolchain |
+| Docker 3 | `npm rebuild bcrypt --build-from-source` fails with `gyp ERR! find Python` … `gyp ERR! not ok` (4 lines) | fails, exit 1; the post's four lines are all in the real output (between them node-gyp prints more `find Python` lines and a stack trace). New: npm 11.20.0 first warns `npm warn Unknown cli config "--build-from-source". This will stop working in the next major version of npm.`; the flag still reaches node-gyp today |
+| Docker 3 | distroless: `docker: Error response from daemon: failed to create task for container:` / `exec: "sh": executable file not found in $PATH` | same error with a longer prefix on Docker 29: `failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "sh": executable file not found in $PATH`, exit 127 |
+| Docker 4.1 | `docker history` shows `RUN \|1 NPM_TOKEN=<token> /bin/sh -c …` and `ARG NPM_TOKEN=<token>` | identical, with the fake token. New: Docker 29 prints the build warning `SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "NPM_TOKEN")`, and builds the image anyway |
+| Docker 4.2 | history shows only `$(cat /run/secrets/npm_token)`; a grep for the token finds nothing | identical |
+| Docker 4.2 | the `# syntax=docker/dockerfile:1` line is required ("bắt buộc") for `--mount` | **not required** on Docker 29.4.2 / BuildKit v0.29.0: the same `RUN --mount=type=secret,required=true` builds and reads the secret without it. Recommended: it pins the latest 1.x Dockerfile syntax |
+| Docker 7 | `wagoodman/dive:latest`; `efficiency: 98.7044 %`, `wastedBytes: 5275656 bytes (5.3 MB)`, `userWastedPercent: 2.6348 %`, `Result:PASS [Total:3] [Passed:2] [Failed:0] [Warn:0] [Skipped:1]` | `wagoodman/dive:v0.13.1` (checked by hand on 2026-11-22: Docker Hub lists the same digest, `sha256:f1886e6c…`, for `latest` and `v0.13.1`); `efficiency: 99.3056 %`, `wastedBytes: 3503492 bytes (3.5 MB)`, `userWastedPercent: 1.9817 %`, `Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]`. Three rules pass because `.dive-ci` sets all three |
