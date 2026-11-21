@@ -13,7 +13,7 @@ export interface ShippingInput {
   isExpress: boolean;
 }
 
-export const FREE_SHIPPING_THRESHOLD = 500_000;
+export const FREE_SHIPPING_THRESHOLD = 600_000;
 export const STANDARD_SHIPPING_FEE = 30_000;
 export const EXPRESS_SHIPPING_FEE = 50_000;
 
