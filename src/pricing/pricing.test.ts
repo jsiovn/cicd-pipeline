@@ -64,3 +64,8 @@ describe("isFreeShipping: every combination", () => {
     expect(isFreeShipping(input)).toBe(expected);
   });
 });
+
+// Bug #412: a line with quantity = 0 made the cart total NaN.
+test("bug #412: quantity = 0 must not break the total", () => {
+  expect(cartTotal([{ sku: "TSHIRT", unitPrice: 100_000, quantity: 0 }])).toBe(0);
+});
