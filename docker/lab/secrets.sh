@@ -38,7 +38,7 @@ printf '# syntax=docker/dockerfile:1\nFROM node:26-slim\n%s\n' "$mount_run" > "$
 printf 'FROM node:26-slim\n%s\n' "$mount_run" > "$RUNNER_TEMP/Dockerfile.without-directive"
 for variant in with-directive without-directive; do
   must "cat $RUNNER_TEMP/Dockerfile.$variant"
-  run "docker build --no-cache --progress=plain --secret id=npm_token,src=$token_file -f $RUNNER_TEMP/Dockerfile.$variant -t mount:$variant docker/lab > $out_dir/mount-$variant.log 2>&1; status=\$?; grep -E 'docker/dockerfile|secret mounted: [0-9]|ERROR|DONE [0-9.]+s\$' $out_dir/mount-$variant.log; exit \$status"
+  run "docker build --no-cache --progress=plain --secret id=npm_token,src=$token_file -f $RUNNER_TEMP/Dockerfile.$variant -t mount:$variant docker/lab > $out_dir/mount-$variant.log 2>&1; status=\$?; grep -E '^#[0-9]+ (\[|resolve image config|docker-image://)|secret mounted: [0-9]|ERROR' $out_dir/mount-$variant.log; exit \$status"
   printf -v "rc_${variant//-/_}" '%s' "$rc"
 done
 grep -q 'secret mounted: 25 bytes' "$out_dir/mount-with-directive.log" || fail "the build with the directive did not mount the secret"

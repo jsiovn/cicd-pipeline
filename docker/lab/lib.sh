@@ -1,8 +1,9 @@
 # Shared helpers for the Docker lab scripts (sourced, not executed).
 # Each experiment writes what it ran and what it printed into lab-out/<name>.txt;
 # `finish` copies that file into the job summary. The workflow uploads lab-out/.
+# lab-out/ lives outside the checkout so the logs never enter a build context.
 
-out_dir=${LAB_OUT:-lab-out}
+out_dir=${LAB_OUT:-${RUNNER_TEMP:-/tmp}/lab-out}
 mkdir -p "$out_dir"
 
 lab_start() { # name title
@@ -17,13 +18,15 @@ note() { # text: a line of context in the record, not a command
 }
 
 # run 'command string': records "$ command", then its stdout+stderr verbatim,
-# then "[exit N]" when it fails. Never aborts the script; the exit code is
-# left in $rc and the output in $out for the assertions that follow.
+# then "[exit N]" when it fails. Terminal colour codes are stripped. Never
+# aborts the script; the exit code is left in $rc and the output in $out for
+# the assertions that follow.
 run() {
   printf '$ %s\n' "$1" | tee -a "$lab_log"
   set +e
   out=$(bash -o pipefail -c "$1" 2>&1)
   rc=$?
+  out=$(sed 's/\x1b\[[0-9;]*m//g' <<< "$out")
   set -e
   if [ -n "$out" ]; then printf '%s\n' "$out" | tee -a "$lab_log"; fi
   if [ "$rc" -ne 0 ]; then printf '[exit %s]\n' "$rc" | tee -a "$lab_log"; fi

@@ -8,15 +8,18 @@ lab_start layer-cache "Layer cache: naive vs ordered (post 1.1, 1.2)"
 versions
 
 # Builds with --progress=plain into $3 and records the command, the per-step
-# lines ("[n/m]" headers with their DONE / CACHED lines) and the wall time.
+# lines ("[n/m]" headers, each with its final DONE / CACHED line; the full log
+# is in the artifact) and the wall time.
 timed_build() { # variant dockerfile log
   local cmd="docker build --progress=plain -f $2 -t lab:$1 ." start end
   printf '$ %s\n' "$cmd" | tee -a "$lab_log"
   start=$(date +%s.%N)
   $cmd > "$3" 2>&1 || { cat "$3"; fail "build failed: $cmd"; }
   end=$(date +%s.%N)
-  awk '/^#[0-9]+ \[[^]]*[0-9]+\/[0-9]+\]/ { id[$1] = 1; print; next }
-       ($1 in id) && ($2 == "DONE" || $2 == "CACHED") { print }' "$3" | tee -a "$lab_log"
+  awk '/^#[0-9]+ \[[^]]*[0-9]+\/[0-9]+\]/ { if (!($1 in head)) order[++n] = $1; head[$1] = $0; next }
+       ($1 in head) && ($2 == "DONE" || $2 == "CACHED") { last[$1] = $0 }
+       END { for (i = 1; i <= n; i++) { print head[order[i]]; print last[order[i]] } }' "$3" |
+    tee -a "$lab_log"
   awk -v s="$start" -v e="$end" 'BEGIN { printf "TOTAL %.2f s (wall time of docker build)\n\n", e - s }' |
     tee -a "$lab_log"
 }
