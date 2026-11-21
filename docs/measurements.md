@@ -237,3 +237,68 @@ The teaching points hold on Vitest 5 and MSW 3: one test gives 100% coverage whi
 | 8.1 | Enable `vitest run --reporter=github-actions` on CI | Already active under GitHub Actions without the flag; passing it replaces the default reporter (see CI flags above) |
 | 8.1 | `vitest run --bail=1` is worth enabling on CI | Not a sensible default for pull-request runs (see CI flags above) |
 | 8.1 | `vitest run --shard=1/4` | Shards split by test file, and the count may not exceed the number of test files: in this repo (2 test files) `--shard=1/4` fails with exit code 1 (see Shards above). Fine on a suite with 4 or more files |
+
+## E2E
+
+Measured 2026-11-21 (UTC) on pull request [#5](https://github.com/jsiovn/cicd-pipeline/pull/5), head commit `f0f683a` (`ci: e2e job with a hand-written Playwright browser cache key`), before it was squash-merged. Job `e2e` in `.github/workflows/ci.yml`: Node 26 (v26.13.1), `npm ci`, `actions/cache@v6` on `~/.cache/ms-playwright`, `npx playwright install --with-deps chromium`, `npx playwright test`. Log lines are verbatim with the timestamp prefix removed.
+
+Versions: `@playwright/test` 1.65.1 (`npx playwright --version` prints `Version 1.65.1`); it installs Chrome for Testing 159.0.8154.6 (playwright chromium v1255), Chrome Headless Shell 159.0.8154.6 (chromium-headless-shell v1255) and FFmpeg (v1013).
+
+Method: before the first push `gh cache list --repo jsiovn/cicd-pipeline` had no `Linux-playwright-` entry, so the PR's first run was a real MISS. `gh run rerun` of that run gave attempt 2, which restored the cache attempt 1 had saved (HIT; a pull request's caches are visible to later runs of the same pull request). Durations come from `gh run view <run> --attempt <n> --json jobs` (`completedAt - startedAt`, whole seconds as the API reports them).
+
+Run wall clock (`run_started_at` → `updated_at`): attempt 1 (miss) 23:00:13Z → 23:01:03Z = **50s**; attempt 2 (hit) 23:01:26Z → 23:02:06Z = **40s**.
+
+| Step of job `e2e` | Miss | Hit |
+| --- | --- | --- |
+| `Cache Playwright browsers` (restore) | 1s | 3s |
+| `npx playwright install --with-deps chromium` | 17s | 10s |
+| `npx playwright test` | 6s | 4s |
+| `Post Cache Playwright browsers` (save) | 4s | 0s |
+| **Job total** | **42s** | **30s** |
+
+Cache lines, attempt 1 (MISS) (step | line):
+
+```text
+Cache Playwright browsers      | key: Linux-playwright-1.65.1
+Cache Playwright browsers      | restore-keys: Linux-playwright-
+Cache Playwright browsers      | Cache not found for input keys: Linux-playwright-1.65.1, Linux-playwright-
+Run npx playwright install ... | Chrome for Testing 159.0.8154.6 (playwright chromium v1255) downloaded to /home/runner/.cache/ms-playwright/chromium-1255
+Run npx playwright install ... | FFmpeg (playwright ffmpeg v1013) downloaded to /home/runner/.cache/ms-playwright/ffmpeg-1013
+Run npx playwright install ... | Chrome Headless Shell 159.0.8154.6 (playwright chromium-headless-shell v1255) downloaded to /home/runner/.cache/ms-playwright/chromium_headless_shell-1255
+Post Cache Playwright browsers | Sent 307324571 of 307324571 (100.0%), 183.1 MBs/sec
+Post Cache Playwright browsers | Cache saved with key: Linux-playwright-1.65.1
+```
+
+Cache lines, attempt 2 (HIT); the install step printed no `Downloading` line:
+
+```text
+Cache Playwright browsers      | Cache hit for: Linux-playwright-1.65.1
+Cache Playwright browsers      | Received 307324571 of 307324571 (100.0%), 175.5 MBs/sec
+Cache Playwright browsers      | Cache Size: ~293 MB (307324571 B)
+Cache Playwright browsers      | Cache restored successfully
+Cache Playwright browsers      | Cache restored from key: Linux-playwright-1.65.1
+Post Cache Playwright browsers | Cache hit occurred on the primary key Linux-playwright-1.65.1, not saving cache.
+```
+
+Test result, both attempts: `Running 1 test using 1 worker`, then `1 passed (4.7s)` (miss) and `1 passed (3.0s)` (hit). No `flaky` and no retry: the test passed on its first try both times, so `retries: 2` never ran.
+
+What the numbers say:
+
+- The cache saves about 12s per job here (42s → 30s): the three downloads took about 8s (first `Downloading` line 23:00:37.7Z → last `downloaded to` 23:00:45.9Z), restoring the 293 MB archive takes about 3s, and a hit skips the 4s save.
+- `--with-deps` still runs on a hit: the install step keeps about 8.5s of `apt-get` work (23:01:43.9Z → 23:01:52.4Z), because system packages are not part of the cache. On the `ubuntu-latest` image every package was already present (`... is already the newest version`).
+- The key holds the Playwright version, read from the installed package, so upgrading `@playwright/test` changes the key. `restore-keys: Linux-playwright-` then restores the previous version's browsers, `playwright install` downloads only the new revision, and the job saves a new entry under the new key (the old revision is carried along in it).
+- Caches written by a pull request are scoped to that pull request: the first run on `main` after the merge is a miss again, and it saves the entry that `main` and later pull requests use.
+
+Playwright's own advice — source: the Playwright docs, "Continuous Integration › Caching browsers", read 2026-11-22 through Context7 (documentation, not a measurement):
+
+> Caching browser binaries is not recommended, since the amount of time it takes to restore the cache is comparable to the time it takes to download the binaries. Especially under Linux, operating system dependencies need to be installed, which are not cacheable.
+
+The numbers above agree with the first half (3s restore vs about 8s download) and show the second half (the apt step stays). The cache is kept here because it is the CI/CD post's example of a key written by hand.
+
+### Post says / reality (E2E)
+
+| Post section | Post says | Reality (Playwright 1.65.1, docs read 2026-11-22) |
+| --- | --- | --- |
+| Testing 7.2 | Playwright 1.61.1 | 1.65.1 is current; [`e2e/checkout.spec.ts`](../e2e/checkout.spec.ts) is the post's snippet unchanged and passes against `GET /checkout` |
+| Testing 7.2 | Config: `fullyParallel: true`, `forbidOnly: !!process.env.CI`, `retries: process.env.CI ? 2 : 0`, `use.trace: "on-first-retry"` | All four are written exactly so in the current docs. The docs' CI page also sets `workers: process.env.CI ? 1 : undefined` (left out here: one test), and the config `npm init playwright` generates sets `reporter: "html"`. A runnable config also needs `baseURL` (for `page.goto("/checkout")`) and `webServer` (to start the app): [`playwright.config.ts`](../playwright.config.ts) adds both, plus a `list` reporter so the log shows `1 passed` / `1 flaky` |
+| CI/CD 3.2 | `actions/cache@v6`, `key: ${{ runner.OS }}-…`, `restore-keys` prefix | `actions/cache@v6` (latest v6.1.0) behaves as described: exact `key` first, then the newest entry matching the `restore-keys` prefix. The job writes `runner.os`; expressions are case-insensitive, so `runner.OS` gives the same `Linux` |
