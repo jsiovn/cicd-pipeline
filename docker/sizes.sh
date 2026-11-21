@@ -16,8 +16,22 @@ variants=(
   "distroless|docker/Dockerfile.distroless|gcr.io/distroless/nodejs26-debian13"
 )
 
-size_bytes() { docker image inspect --format '{{.Size}}' "$1"; }
-size_human() { docker image ls --format '{{.Size}}' "$1" | head -n 1; }
+# Docker 29 uses the containerd image store: `docker image inspect .Size` is the
+# compressed content size and the `docker image ls` SIZE column is disk usage
+# (unpacked layers + compressed content). The size the article compares is the
+# unpacked one, the sum of the layer sizes in `docker history`. Record all three.
+human() { awk '{ split("B kB MB GB TB", u, " "); i = 1; s = $1
+  while (s >= 1000 && i < 5) { s /= 1000; i++ }; printf "%.3g%s\n", s, u[i] }'; }
+image_json() { # image
+  local unpacked compressed
+  unpacked=$(docker history --human=false --format '{{.Size}}' "$1" | awk '{ s += $1 } END { print s }')
+  compressed=$(docker image inspect --format '{{.Size}}' "$1")
+  jq -n --argjson unpacked "$unpacked" --argjson compressed "$compressed" \
+    --arg size "$(human <<< "$unpacked")" --arg compressed_size "$(human <<< "$compressed")" \
+    --arg disk_usage "$(docker image ls --format '{{.Size}}' "$1" | head -n 1)" \
+    '{size: $size, bytes: $unpacked, compressed_size: $compressed_size,
+      compressed_bytes: $compressed, disk_usage: $disk_usage}'
+}
 
 build() { # tag file [extra buildx args...]
   local tag=$1 file=$2
@@ -33,11 +47,10 @@ for v in "${variants[@]}"; do
   build "orders-api:$name" "$file"
   docker pull -q "$base"
   echo "::endgroup::"
-  jq -n --arg variant "$name" --arg dockerfile "$file" --arg base "$base" \
-    --argjson base_bytes "$(size_bytes "$base")" --arg base_size "$(size_human "$base")" \
-    --argjson bytes "$(size_bytes "orders-api:$name")" --arg size "$(size_human "orders-api:$name")" \
-    '{variant: $variant, dockerfile: $dockerfile, base: $base,
-      base_size: $base_size, base_bytes: $base_bytes, size: $size, bytes: $bytes}' >> variants.jsonl
+  jq -n --arg variant "$name" --arg dockerfile "$file" --arg base_image "$base" \
+    --argjson base "$(image_json "$base")" --argjson final "$(image_json "orders-api:$name")" \
+    '{variant: $variant, dockerfile: $dockerfile, base_image: $base_image,
+      base: $base, final: $final}' >> variants.jsonl
 done
 
 # node_modules of the two install stages of the production Dockerfile.
@@ -88,9 +101,11 @@ jq -s --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg commit "${GITHUB_SHA:-lo
 {
   echo "### Image sizes"
   echo
-  echo "| Variant | Dockerfile | Base image | Base size | Final size |"
-  echo "| --- | --- | --- | --- | --- |"
-  jq -r '.variants[] | "| \(.variant) | `\(.dockerfile)` | `\(.base)` | \(.base_size) | \(.size) |"' sizes.json
+  echo "Size = unpacked (sum of the \`docker history\` layers); compressed = what a pull downloads."
+  echo
+  echo "| Variant | Dockerfile | Base image | Base size | Final size | Base compressed | Final compressed |"
+  echo "| --- | --- | --- | --- | --- | --- | --- |"
+  jq -r '.variants[] | "| \(.variant) | `\(.dockerfile)` | `\(.base_image)` | \(.base.size) | \(.final.size) | \(.base.compressed_size) | \(.final.compressed_size) |"' sizes.json
   echo
   echo "### node_modules"
   echo
