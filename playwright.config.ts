@@ -11,7 +11,6 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
   },
-  // Builds and starts the real API (dist/server.js) before the tests.
   webServer: {
     command: "npm run build && npm start",
     url: "http://localhost:3000/healthz",
