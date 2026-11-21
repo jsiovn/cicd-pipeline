@@ -22,7 +22,7 @@ Run wall clock (`run_started_at` → `updated_at`): attempt 2 (miss) 22:19:51Z �
 
 `build` is not a miss in attempt 2: it starts after `lint` and `test`, and by then `test (24)` had saved the cache, so `build` restored it (see the log lines below).
 
-Log lines containing "Cache", attempt 2 (MISS), verbatim (job | step | line):
+Cache result lines, attempt 2 (MISS), verbatim (job | step | line; the input echo, `Cache mode` and tar command lines are left out):
 
 ```text
 lint      | Run actions/setup-node@v7      | npm cache is not found
@@ -57,17 +57,17 @@ What the numbers say:
 - On a cold cache, parallel jobs race to save that one key: one wins (`Cache saved with the key`), the others log `Failed to save: Unable to reserve cache ... another job may be creating this cache.` and still succeed.
 - The setup-node step also installs Node itself (Node 26 is downloaded, Node 22 and 24 come from the runner's tool cache), so its time is not a pure cache-restore time.
 
-`actions/setup-node` and automatic caching (README at tag `v7` read 2026-11-21; latest release `v7.1.0`):
+`actions/setup-node` and automatic caching — source: the action's README at tag `v7`, read 2026-11-21 (documentation, not a measurement; latest release `v7.1.0`). From its caching section:
 
 > Caching for npm dependencies is automatically enabled when your `package.json` contains either `devEngines.packageManager` field or top-level `packageManager` field set to `npm`, and no explicit cache input is provided.
 
 > If your `package.json` file does not include a `packageManager` field set to `npm`, caching will be disabled unless you explicitly enable it.
 
-The README lists this under "Breaking changes in V6" (V5 had first turned caching on by default with package-manager detection). The switch is the `package-manager-cache` input, default `true`; the logs above print `package-manager-cache: true`. This repo's `package.json` has no `packageManager` field, so caching here comes from the explicit `cache: npm` line. Yarn and pnpm are never cached automatically: they need `cache: yarn` / `cache: pnpm`.
+Its "Breaking changes in V6" list repeats this rule as a bullet (V5 had first turned caching on by default with package-manager detection). The switch is the `package-manager-cache` input, default `true`; the setup-node step of every job in the runs above echoes `package-manager-cache: true` among its inputs. This repo's `package.json` has no `packageManager` field, so caching here comes from the explicit `cache: npm` line. Yarn and pnpm are never cached automatically: they need `cache: yarn` / `cache: pnpm`.
 
 ## PR gate
 
-Set up 2026-11-21. Ruleset `main` (id 27813828), created with `gh api -X POST repos/jsiovn/cicd-pipeline/rulesets --input <file>`: enforcement `active`, target the default branch, no bypass actors.
+Set up 2026-11-21, with `main` at `c24a904` (`3f4def1` added `ci-ok`, `c24a904` added Dependabot). Ruleset `main` (id 27813828), created with `gh api -X POST repos/jsiovn/cicd-pipeline/rulesets --input <file>`: enforcement `active`, target the default branch, no bypass actors.
 
 `gh api repos/jsiovn/cicd-pipeline/rules/branches/main --jq '.[].type'`:
 
@@ -78,7 +78,7 @@ pull_request
 required_status_checks
 ```
 
-`pull_request` requires 0 approvals (one maintainer). `required_status_checks` requires the single check `ci-ok`, with "Require branches to be up to date" (`strict_required_status_checks_policy: true`). `ci-ok` is the job in `ci.yml` that `needs: [lint, test, build]` and runs with `if: always()`, so it reports success or failure on every pull request and is never left "expected".
+`pull_request` requires 0 approvals (one maintainer). `required_status_checks` requires the single check `ci-ok`, with "Require branches to be up to date" (`strict_required_status_checks_policy: true`). `ci-ok` is the job in `ci.yml` that `needs: [lint, test, build]` and runs with `if: always()`, so it reports even when a needed job failed or was skipped: a failing matrix leg or a renamed job cannot leave it "expected". (A pull request that starts no CI run at all — a merge conflict, a `[skip ci]` commit — still leaves it expected.)
 
 A direct push to `main` (an empty commit) after the ruleset was active, verbatim:
 
@@ -97,5 +97,5 @@ Ruleset page without a login: `curl -s -o /dev/null -w "%{http_code}" https://gi
 Exhibit pull requests (label `exhibit`):
 
 - [#2](https://github.com/jsiovn/cicd-pipeline/pull/2) `docs: show the CI status of main in the README` touches only `README.md`. `gh pr view 2 --json mergeStateStatus,statusCheckRollup` before merging: `CLEAN`; `lint`, `test (22)`, `test (24)`, `test (26)`, `build` and `ci-ok` all `COMPLETED SUCCESS`. Squash-merged through the gate.
-- [#1](https://github.com/jsiovn/cicd-pipeline/pull/1) `[exhibit] Raise the free-shipping threshold to 600,000 VND` changes `FREE_SHIPPING_THRESHOLD` in `src/pricing/index.ts` from `500_000` to `600_000`, and is kept open. After its branch was updated to `main`: `mergeStateStatus` `BLOCKED`; `lint` `SUCCESS`; `test (22)`, `test (24)`, `test (26)` `FAILURE`; `build` `SKIPPED`; `ci-ok` `FAILURE`. The failing test, from the log: `FAIL src/pricing/pricing.test.ts > isFreeShipping > is free from 500,000 VND`, `AssertionError: expected false to be true // Object.is equality`, `Tests 1 failed | 8 passed (9)`.
-  - Vitest's GitHub Actions annotation sits at `src/pricing/pricing.test.ts:25` (title `src/pricing/pricing.test.ts > isFreeShipping > is free from 500,000 VND`). The PR does not touch that file, so the annotation shows in the run summary and the PR's Checks tab, not inline under "Files changed": GitHub draws an annotation on the diff only on lines the diff contains.
+- [#1](https://github.com/jsiovn/cicd-pipeline/pull/1) `[exhibit] Raise the free-shipping threshold to 600,000 VND` changes `FREE_SHIPPING_THRESHOLD` in `src/pricing/index.ts` from `500_000` to `600_000`, and is kept open. Snapshot with its head at `a1bc637`, rebased on `main` at `997bf1f`: `mergeStateStatus` `BLOCKED`; `lint` `SUCCESS`; `test (22)`, `test (24)`, `test (26)` `FAILURE`; `build` `SKIPPED`; `ci-ok` `FAILURE`. The failing test, from the log: `FAIL src/pricing/pricing.test.ts > isFreeShipping > is free from 500,000 VND`, `AssertionError: expected false to be true // Object.is equality`, `Tests 1 failed | 8 passed (9)`.
+  - Vitest's GitHub Actions annotation (read with `gh api repos/jsiovn/cicd-pipeline/check-runs/<id>/annotations`) sits at `src/pricing/pricing.test.ts:25`, title `src/pricing/pricing.test.ts > isFreeShipping > is free from 500,000 VND`. The PR itself does not touch that file: the annotation points at the test that broke, not at the line that broke it.
