@@ -32,7 +32,8 @@ ok "safe:demo: the token is in neither the history nor the image config"
 
 note "---- is '# syntax=docker/dockerfile:1' required for RUN --mount? ----"
 note "same Dockerfile twice, with and without the directive; required=true makes the"
-note "build fail if the secret is not mounted"
+note "build fail if the secret is not mounted. The build with the directive is also the"
+note "positive control for safe:demo: same frontend, same token file, the mount works"
 mount_run='RUN --mount=type=secret,id=npm_token,required=true sh -c '\''echo "secret mounted: $(wc -c < /run/secrets/npm_token) bytes"'\'''
 printf '# syntax=docker/dockerfile:1\nFROM node:26-slim\n%s\n' "$mount_run" > "$RUNNER_TEMP/Dockerfile.with-directive"
 printf 'FROM node:26-slim\n%s\n' "$mount_run" > "$RUNNER_TEMP/Dockerfile.without-directive"
@@ -41,9 +42,9 @@ for variant in with-directive without-directive; do
   run "docker build --no-cache --progress=plain --secret id=npm_token,src=$token_file -f $RUNNER_TEMP/Dockerfile.$variant -t mount:$variant docker/lab > $out_dir/mount-$variant.log 2>&1; status=\$?; grep -E '^#[0-9]+ (\[|resolve image config|docker-image://)|secret mounted: [0-9]|ERROR' $out_dir/mount-$variant.log; exit \$status"
   printf -v "rc_${variant//-/_}" '%s' "$rc"
 done
-grep -q 'secret mounted: 25 bytes' "$out_dir/mount-with-directive.log" || fail "the build with the directive did not mount the secret"
+grep -q "secret mounted: ${#token} bytes" "$out_dir/mount-with-directive.log" || fail "the build with the directive did not mount the secret"
 [ "$rc_with_directive" -eq 0 ] || fail "the build with the syntax directive failed"
-if [ "$rc_without_directive" -eq 0 ] && grep -q 'secret mounted: 25 bytes' "$out_dir/mount-without-directive.log"; then
+if [ "$rc_without_directive" -eq 0 ] && grep -q "secret mounted: ${#token} bytes" "$out_dir/mount-without-directive.log"; then
   ok "RUN --mount builds and mounts the secret WITHOUT the syntax directive: recommended, not required"
 else
   ok "RUN --mount does not work without the syntax directive (exit $rc_without_directive): required"

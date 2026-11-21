@@ -27,7 +27,7 @@ timed_build() { # variant dockerfile log
 step_status() { # log pattern
   local id
   id=$(grep -E "^#[0-9]+ \[[0-9]+/[0-9]+\] $2" "$1" | head -n 1 | cut -d' ' -f1)
-  grep -E "^$id (DONE|CACHED)" "$1" | tail -n 1 | cut -d' ' -f2
+  grep -E "^$id (DONE|CACHED)" "$1" | tail -n 1 | cut -d' ' -f2 || true
 }
 
 for v in naive ordered; do
@@ -37,6 +37,7 @@ for v in naive ordered; do
   note "---- $v: change one line of src/server.ts ----"
   must "sed -i 's/listening on/listening on port/' src/server.ts"
   must "git diff -U0 -- src/server.ts"
+  git diff --quiet -- src/server.ts && fail "the sed edit changed nothing in src/server.ts"
   note "---- $v: rebuild after the one-line change ----"
   timed_build "$v" "$file" "$out_dir/$v-rebuild.log"
   must "git checkout -- src/server.ts"

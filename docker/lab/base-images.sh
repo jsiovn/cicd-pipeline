@@ -26,7 +26,8 @@ note "---- alpine: force a build from source (node:26-alpine, no toolchain added
 run "docker run --rm orders-api:alpine npm rebuild bcrypt --build-from-source"
 rebuild_rc=$rc
 [ "$rebuild_rc" -ne 0 ] || fail "npm rebuild bcrypt --build-from-source succeeded on plain alpine"
-ok "npm rebuild bcrypt --build-from-source fails on plain alpine (exit $rebuild_rc)"
+grep -q 'gyp ERR! find Python' <<< "$out" || fail "the build from source failed, but not for lack of Python"
+ok "npm rebuild bcrypt --build-from-source fails on plain alpine: no Python (exit $rebuild_rc)"
 
 note "---- distroless: no shell ----"
 run "docker run --rm --entrypoint sh orders-api:distroless -c 'echo hi'"

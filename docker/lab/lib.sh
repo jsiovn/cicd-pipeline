@@ -3,7 +3,8 @@
 # `finish` copies that file into the job summary. The workflow uploads lab-out/.
 # lab-out/ lives outside the checkout so the logs never enter a build context.
 
-out_dir=${LAB_OUT:-${RUNNER_TEMP:-/tmp}/lab-out}
+RUNNER_TEMP=${RUNNER_TEMP:-/tmp}
+out_dir=${LAB_OUT:-$RUNNER_TEMP/lab-out}
 mkdir -p "$out_dir"
 
 lab_start() { # name title
