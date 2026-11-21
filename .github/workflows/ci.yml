@@ -54,3 +54,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+  # The one check the ruleset requires. Matrix legs ("test (22)", ...) and
+  # renamed jobs come and go; this name stays. if: always() makes it report
+  # even when a needed job failed or was skipped, so it never stays pending.
+  ci-ok:
+    needs: [lint, test, build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every needed job succeeded
+        run: echo '${{ toJSON(needs.*.result) }}' | jq -e 'all(. == "success")'
