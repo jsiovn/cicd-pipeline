@@ -24,7 +24,7 @@ npm run dev        # tsx watch src/server.ts
 npm run lint
 npm run typecheck  # tsc --noEmit
 npm test           # vitest run
-npm run build      # tsc -> dist/
+npm run build      # tsc -p tsconfig.build.json -> dist/ (tests excluded)
 npm start          # node dist/server.js
 ```
 
@@ -43,7 +43,7 @@ curl -s -X POST localhost:3000/orders -H 'content-type: application/json' \
 | CI/CD 1 — anatomy of a workflow (minimal workflow) | [`.github/workflows/ci.yml` at 982b006](https://github.com/jsiovn/cicd-pipeline/blob/982b006ff18a6aac56955352601ab650458979dc/.github/workflows/ci.yml) (`ci: minimal workflow`) | [Actions › CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml), commit 982b006 |
 | CI/CD 2.1 — sequential pipeline in one job | [`.github/workflows/ci.yml` at 9f71e51](https://github.com/jsiovn/cicd-pipeline/blob/9f71e511e029fd3a53d6fd9f54546f26bdc445fd/.github/workflows/ci.yml) (`ci: full sequential pipeline`) | [Actions › CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml), commit 9f71e51 |
 | CI/CD 2.2 — parallel jobs with `needs` | [`.github/workflows/ci.yml` at 80bb44d](https://github.com/jsiovn/cicd-pipeline/blob/80bb44df01fcc7387ec34e0933c3cd7ebc6d4731/.github/workflows/ci.yml) (`ci: split into parallel jobs`) | [Actions › CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml), commit 80bb44d |
-| CI/CD 8.1, 8.3, 8.4 — `concurrency`, test matrix [22, 24, 26] with `fail-fast: false`, `timeout-minutes` | [`.github/workflows/ci.yml`](https://github.com/jsiovn/cicd-pipeline/blob/main/.github/workflows/ci.yml) (`ci: concurrency, matrix, timeouts`, 497165a) | [Actions › CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml): jobs `lint`, `test (22)`, `test (24)`, `test (26)`, `build` |
+| CI/CD 8.1, 8.3, 8.4 — `concurrency`, test matrix [22, 24, 26] with `fail-fast: false`, `timeout-minutes` | [`.github/workflows/ci.yml` at 497165a](https://github.com/jsiovn/cicd-pipeline/blob/497165a10867ad9ff546505955346d0973b4412a/.github/workflows/ci.yml) (`ci: concurrency, matrix, timeouts`; current version: [`ci.yml` on main](https://github.com/jsiovn/cicd-pipeline/blob/main/.github/workflows/ci.yml)) | [Actions › CI](https://github.com/jsiovn/cicd-pipeline/actions/workflows/ci.yml): jobs `lint`, `test (22)`, `test (24)`, `test (26)`, `build` |
 | CI/CD 8.2 — `paths` filter | not applied | CI is meant to become a required check, and a `paths` filter would leave PRs outside those paths waiting forever (the trap the post describes) |
 
 Measured numbers quoted by the posts live in [docs/measurements.md](docs/measurements.md).
