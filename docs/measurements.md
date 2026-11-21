@@ -383,7 +383,7 @@ Job `publish` of the same workflow pushes the production image (root `Dockerfile
 
 ## Docker lab (build-time)
 
-Measured 2026-11-21 (jobs started 23:42 UTC) by run `44963084906` of [`.github/workflows/docker-lab.yml`](../.github/workflows/docker-lab.yml) on pull request [#7](https://github.com/jsiovn/cicd-pipeline/pull/7), head commit `78481cf` (`ci: keep lab logs out of the build context, strip colour codes, one line per build step`). Each job runs one script in [`docker/lab/`](../docker/lab); everything below is copied from the artifacts it uploaded (`lab-layer-cache`, `lab-build-context`, `lab-base-images`, `lab-secrets`, `lab-dive`). Lines starting with `$` are the commands, `# ----` lines are the script's own headings, `[exit N]` marks a non-zero exit code. Terminal colour codes are stripped.
+Measured 2026-11-21 (jobs started 23:42 UTC) by run `44963084906` of [`.github/workflows/docker-lab.yml`](../.github/workflows/docker-lab.yml) on pull request [#7](https://github.com/jsiovn/cicd-pipeline/pull/7), head commit `78481cf` (`ci: keep lab logs out of the build context, strip colour codes, one line per build step`). Each job runs one script in [`docker/lab/`](../docker/lab) (the next commit, `ci: tighten the lab assertions`, only adds checks to the scripts; the outputs are unchanged); everything below is copied from the artifacts it uploaded (`lab-layer-cache`, `lab-build-context`, `lab-base-images`, `lab-secrets`, `lab-dive`). Lines starting with `$` are the commands, `# ----` lines are the script's own headings, `[exit N]` marks a non-zero exit code. Terminal colour codes are stripped.
 
 Runner: `ubuntu-latest`, `Docker server 29.4.2, client 29.4.2`, `github.com/docker/buildx v0.39.0 360040a78d6113dc84e5d4dcdf0f438e1be7a41f`, `Driver: docker`, `BuildKit version: v0.29.0` (the BuildKit built into dockerd; this workflow does not use `setup-buildx-action`), `linux/amd64`, the Node 26 base images of [Docker images](#docker-images).
 
@@ -709,11 +709,11 @@ $ docker build --no-cache --progress=plain --secret id=npm_token,src=/home/runne
 #5 0.128 secret mounted: 25 bytes
 ```
 
-Both builds succeed and both read the 25-byte secret. With the directive, BuildKit first pulls the `docker/dockerfile:1` frontend image (`resolve image config for docker-image://docker.io/docker/dockerfile:1`); without it, the Dockerfile frontend built into BuildKit v0.29.0 parses the file and handles `RUN --mount=type=secret` itself. On this Docker the directive is **recommended, not required**: it pins the Dockerfile syntax to the latest `1.x` frontend instead of whatever the local BuildKit bundles.
+Both builds succeed and both read the 25-byte secret. The build with the directive is also the positive control for `safe:demo` (same frontend, same token file): the secret mount does deliver the token, so its absence from `safe:demo` is not an unmounted secret. With the directive, BuildKit first pulls the `docker/dockerfile:1` frontend image (`resolve image config for docker-image://docker.io/docker/dockerfile:1`); without it, the Dockerfile frontend built into BuildKit v0.29.0 parses the file and handles `RUN --mount=type=secret` itself. On this Docker the directive is **recommended, not required**: it pins the Dockerfile syntax to the latest `1.x` frontend instead of whatever the local BuildKit bundles.
 
 ### dive in CI mode (post 7)
 
-Job `dive`, [`docker/lab/dive.sh`](../docker/lab/dive.sh): `docker.io/wagoodman/dive:v0.13.1` (the latest dive release, 2025-03-29; also published as `ghcr.io/wagoodman/dive`) on the production image built from [`Dockerfile`](../Dockerfile) as `orders-api:multi`, rules in [`.dive-ci`](../.dive-ci) (`lowestEfficiency: 0.95`, `highestWastedBytes: 20MB`, `highestUserWastedPercent: 0.10`; the job fails when a rule fails). The post's command, reading the image through the Docker socket, works against Docker 29 (the script falls back to a `docker save` archive only if it does not):
+Job `dive`, [`docker/lab/dive.sh`](../docker/lab/dive.sh): `docker.io/wagoodman/dive:v0.13.1` (checked by hand on 2026-11-22, not by the job: the latest dive release, published 2025-03-29, also as `ghcr.io/wagoodman/dive`) on the production image built from [`Dockerfile`](../Dockerfile) as `orders-api:multi`, rules in [`.dive-ci`](../.dive-ci) (`lowestEfficiency: 0.95`, `highestWastedBytes: 20MB`, `highestUserWastedPercent: 0.10`; the job fails when a rule fails). The post's command, reading the image through the Docker socket, works against Docker 29 (the script falls back to a `docker save` archive only if it does not):
 
 ```text
 $ docker run --rm -e CI=true -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/.dive-ci:/.dive-ci:ro" docker.io/wagoodman/dive:v0.13.1 orders-api:multi --ci-config /.dive-ci
@@ -755,7 +755,7 @@ Results:
 Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]
 ```
 
-Every inefficient file is in the Debian base layers (`apt`/`dpkg`/`debconf` state and `/etc/passwd`-style files rewritten by a later base layer); none comes from this repo's layers.
+Every inefficient file is in the layers of the base image `node:26-slim` (`apt`/`dpkg`/`debconf` state and `/etc/passwd`-style files written by one base layer and rewritten by a later one); none is under `/app`, so none comes from this repo's layers.
 
 ### Post says / reality (Docker lab)
 
@@ -771,4 +771,4 @@ Every inefficient file is in the Debian base layers (`apt`/`dpkg`/`debconf` stat
 | Docker 4.1 | `docker history` shows `RUN \|1 NPM_TOKEN=<token> /bin/sh -c …` and `ARG NPM_TOKEN=<token>` | identical, with the fake token. New: Docker 29 prints the build warning `SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ARG "NPM_TOKEN")`, and builds the image anyway |
 | Docker 4.2 | history shows only `$(cat /run/secrets/npm_token)`; a grep for the token finds nothing | identical |
 | Docker 4.2 | the `# syntax=docker/dockerfile:1` line is required ("bắt buộc") for `--mount` | **not required** on Docker 29.4.2 / BuildKit v0.29.0: the same `RUN --mount=type=secret,required=true` builds and reads the secret without it. Recommended: it pins the latest 1.x Dockerfile syntax |
-| Docker 7 | `wagoodman/dive:latest`; `efficiency: 98.7044 %`, `wastedBytes: 5275656 bytes (5.3 MB)`, `userWastedPercent: 2.6348 %`, `Result:PASS [Total:3] [Passed:2] [Failed:0] [Warn:0] [Skipped:1]` | `wagoodman/dive:v0.13.1` (Docker Hub lists the same digest, `sha256:f1886e6c…`, for `latest` and `v0.13.1` on 2026-11-22); `efficiency: 99.3056 %`, `wastedBytes: 3503492 bytes (3.5 MB)`, `userWastedPercent: 1.9817 %`, `Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]`. Three rules pass because `.dive-ci` sets all three |
+| Docker 7 | `wagoodman/dive:latest`; `efficiency: 98.7044 %`, `wastedBytes: 5275656 bytes (5.3 MB)`, `userWastedPercent: 2.6348 %`, `Result:PASS [Total:3] [Passed:2] [Failed:0] [Warn:0] [Skipped:1]` | `wagoodman/dive:v0.13.1` (checked by hand on 2026-11-22: Docker Hub lists the same digest, `sha256:f1886e6c…`, for `latest` and `v0.13.1`); `efficiency: 99.3056 %`, `wastedBytes: 3503492 bytes (3.5 MB)`, `userWastedPercent: 1.9817 %`, `Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]`. Three rules pass because `.dive-ci` sets all three |
