@@ -108,6 +108,11 @@ jobs:
             want=${demo#*:}
             got=0
             npm run -s "demo:$name" > "$name.txt" 2>&1 || got=$?
+            # The threshold demo must fail for the threshold, not for any other reason.
+            if [ "$name" = coverage-threshold ] && [ "$got" = 1 ] &&
+              ! grep -q 'does not meet global threshold' "$name.txt"; then
+              got="1 without the threshold error"
+            fi
             cat "$name.txt"
             {
               echo "### npm run demo:$name (exit code $got, expected $want)"
