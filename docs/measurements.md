@@ -1273,4 +1273,4 @@ vercel | rules:  | branch policy: null
 [{"event":"workflow_dispatch","headBranch":"main","status":"waiting"}]
 ```
 
-`gh api repos/jsiovn/cicd-pipeline/actions/runs/<run>/pending_deployments`: environment `production`, `wait_timer` 0, reviewers `jsiovn`, `current_user_can_approve` `true`. Until someone approves, the `promote` job does not start, so the re-tag to `:production` has not run.
+The run's pending deployments (`gh api` on the REST endpoint "Get pending deployments for a workflow run"): environment `production`, `wait_timer` 0, reviewers `jsiovn`, `current_user_can_approve` `true`. Until someone approves, the `promote` job does not start, so the re-tag to `:production` has not run.
