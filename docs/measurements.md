@@ -44,6 +44,12 @@ Contents (one section per topic, in the order the measurements were taken):
   - [`next build` in CI](#next-build-in-ci)
   - [`next build` locally](#next-build-locally)
   - [Post says / reality (Next.js app)](#post-says--reality-nextjs-app)
+- [Next.js standalone](#nextjs-standalone)
+  - [`du` of the build output](#du-of-the-build-output)
+  - [Image sizes (web)](#image-sizes-web)
+  - [HTTP check](#http-check)
+  - [`HOSTNAME` in the generated `server.js`](#hostname-in-the-generated-serverjs)
+  - [Post says / reality (Next.js standalone)](#post-says--reality-nextjs-standalone)
 - [Deploy](#deploy)
   - [GitHub Pages (`pages.yml`)](#github-pages-pagesyml)
   - [Environments](#environments)
@@ -1255,6 +1261,74 @@ HTTP 404
 | --- | --- | --- |
 | Docker 5 | `next.config.ts` with only `output: "standalone"`; `next build` puts `server.js` in `.next/standalone` | true for an app at the root of its repository. Here `web/` sits next to the API's `package-lock.json`, and the first CI run of this app failed `test -f .next/standalone/server.js`: `next build` warned `Next.js inferred your workspace root, but it may not be correct. We detected multiple lockfiles and selected the directory of /home/runner/work/cicd-pipeline/cicd-pipeline/package-lock.json as the root directory.` and wrote `.next/standalone/web/server.js`. One more line in [`web/next.config.ts`](../web/next.config.ts), `outputFileTracingRoot: __dirname`, brings it back to `.next/standalone/server.js` and silences the warning |
 | Docker 5 | an app on Next.js 16.2.10 | Next.js 16.4.6 |
+
+## Next.js standalone
+
+Measured 2026-11-22 (job start 09:21 UTC) by job `sizes` of [`.github/workflows/image.yml`](../.github/workflows/image.yml) on pull request [#15](https://github.com/jsiovn/cicd-pipeline/pull/15), head commit `fed9966` (`build: Next.js standalone and naive images of web/`; `GITHUB_SHA` = test merge commit `bef0c65`). [`docker/sizes.sh`](../docker/sizes.sh) builds the two images of the app in [`web/`](../web) with `web/` as the build context ([`web/.dockerignore`](../web/.dockerignore) keeps `node_modules` and `.next` out of it), plus the `build` stage of `web/Dockerfile` on its own (`--target build`) for the two commands run inside it. Everything below is copied from the `web` object of the `sizes.json` artifact. Same runner, Docker and Buildx as [Docker images](#docker-images): `ubuntu-latest`, Docker `29.4.2`, Buildx `v0.39.0`, `linux/amd64`. Next.js **16.4.6** (`require("next/package.json").version` in the build stage), Node 26 as every other image of this repo.
+
+| Image | Dockerfile | What it does |
+| --- | --- | --- |
+| `web:standalone` | [`web/Dockerfile`](../web/Dockerfile) | stages `deps` (`npm ci`) and `build` (`npm run build`) on `node:26-slim`; the `runner` stage is the post's block with `node:26-slim` instead of `node:24-slim`: copies `public/`, `.next/standalone` and `.next/static` with `--chown=node:node`, `USER node`, `ENV PORT=3000 HOSTNAME=0.0.0.0`, `CMD ["node", "server.js"]` |
+| `web:naive` | [`web/Dockerfile.naive`](../web/Dockerfile.naive) | `node:26`, `COPY . .`, `npm install`, `npm run build`, `CMD ["npm", "start"]`: all of `node_modules` (with devDependencies) and the source stay in the image, as [`docker/Dockerfile.naive`](../docker/Dockerfile.naive) does for the API |
+
+### `du` of the build output
+
+`docker run --rm web:build du -sh .next/standalone node_modules`, verbatim:
+
+```text
+58M	.next/standalone
+574M	node_modules
+```
+
+`node_modules` is the one `npm ci` installs from [`web/package.json`](../web/package.json), devDependencies included (TypeScript, ESLint and `eslint-config-next`, as in the create-next-app template); `next build` needs them.
+
+### Image sizes (web)
+
+Same columns as [Sizes](#sizes): "size" is unpacked (sum of the `docker history` layers), "compressed" is what `docker pull` downloads, and the `docker image ls` SIZE column is disk usage under the containerd image store.
+
+| Image | Base image | Base size | Final size | Base compressed | Final compressed | `docker image ls` SIZE (base / final) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `web:naive` | `node:26` | 1.34GB | 2.19GB | 445MB | 791MB | 1.8GB / 2.98GB |
+| `web:standalone` | `node:26-slim` | 267MB | 328MB | 85.8MB | 106MB | 355MB / 435MB |
+
+Exact bytes (unpacked final / compressed final): `web:naive` 2189631488 / 790958864; `web:standalone` 328253440 / 106312502.
+
+What the numbers say:
+
+- 2.19GB → 328MB unpacked (6.7 times smaller), 791MB → 106MB compressed (7.4 times).
+- On top of `node:26-slim`, the standalone image adds 61MB (328MB − 267MB): `.next/standalone` (58M by `du`), `.next/static` and `public/`. The naive image adds 851MB on top of `node:26`: `node_modules`, the source and the build output in `.next`.
+
+### HTTP check
+
+The same script starts `docker run -d --name web -p 3402:3000 web:standalone`, polls `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3402/` until it gets `200` (the job fails otherwise), then asks for one file of `public/`:
+
+| Request | HTTP status |
+| --- | --- |
+| `GET /` | 200 |
+| `GET /robots.txt` (from `public/`, which the Dockerfile copies next to `server.js`) | 200 |
+
+Started straight from `.next/standalone`, without the copies, the app answers `/robots.txt` with 404: see [`next build` locally](#next-build-locally).
+
+### `HOSTNAME` in the generated `server.js`
+
+`docker run --rm web:build grep -n HOSTNAME .next/standalone/server.js`, verbatim (the only match):
+
+```text
+9:const hostname = process.env.HOSTNAME || '0.0.0.0'
+```
+
+### Post says / reality (Next.js standalone)
+
+| Post section | Post says | Reality (this run) |
+| --- | --- | --- |
+| Docker 5 | an app on Next.js 16.2.10 | Next.js 16.4.6 |
+| Docker 5 | `du -sh .next/standalone node_modules`: 35M and 462M | 58M and 574M |
+| Docker 5 | runner stage on `node:24-slim` | `node:26-slim`; every other line of the post's runner stage is used as written |
+| Docker 5 | `web:standalone` 278MB, `web:naive` 1.96GB, "nhỏ đi 7 lần" | `web:standalone` 328MB, `web:naive` 2.19GB unpacked: 6.7 times smaller (compressed 106MB vs 791MB: 7.4 times; `docker image ls` SIZE 435MB vs 2.98GB) |
+| Docker 5 | `docker run -d -p 3402:3000 web:standalone`, then `curl` → `HTTP 200` | true: `HTTP 200` on `/` through port 3402 |
+| Docker 5 | `public/` and `.next/static/` are not in `.next/standalone` and must be copied | still true on Next.js 16.4.6: the image needs both `COPY` lines; with them `/robots.txt` answers 200. A local build of the same app (2026-11-22) has no `static/` under `.next/standalone/.next/` and serves `/robots.txt` as 404 without the copies |
+| Docker 5 | `server.js` defaults the hostname to `0.0.0.0` (`process.env.HOSTNAME \|\| '0.0.0.0'`) | true, verbatim at line 9 of the generated `server.js` (see above) |
+| Docker 5 | `CMD ["node", "server.js"]`, not `next start` | used as written |
 
 ## Deploy
 
