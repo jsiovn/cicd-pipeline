@@ -482,6 +482,8 @@ What it shows: the naive rebuild re-runs `RUN npm install` (`DONE 3.3s`) because
 
 Job `build-context`, [`docker/lab/build-context.sh`](../docker/lab/build-context.sh), run after `npm ci` so `node_modules` exists. The context is exported exactly as the builder receives it (`FROM scratch`, `COPY . /`, `-o type=local`) and measured with **`du -sh` of the exported directory: that is the figure to quote**. BuildKit's own `transferring context` line (bytes sent to the builder; the builder cache is pruned before each build, so the transfer starts empty) is recorded next to it.
 
+Note (2026-11-22): since the Next.js app was added, `.dockerignore` ends with two more lines, a comment and `web`. The transcript below predates both the app and these lines.
+
 ```text
 $ du -sh node_modules
 181M	node_modules
@@ -1105,3 +1107,53 @@ With `npm start` the process tree is `npm start` (PID 1 in the container) → `s
 | Docker 8.2 | `healthy` "after about thirty seconds" (`sau khoảng ba mươi giây`) | `healthy` after **5.17 s**: the first probe runs at the 5 s default `--start-interval` of the start period (Docker Engine 25+), not after the 30 s `--interval` |
 | Docker 8.3 | `docker stop` logs `listening on 3000` and `SIGTERM received, draining connections` | identical two lines; exit code 0; `docker stop` took 0.11 s, far below the 10 s timeout |
 | Docker 8.3 | `npm start` adds a process that does not forward signals to Node, so the shutdown handler never runs | **holds**: no `SIGTERM received` line. But npm does relay `SIGTERM` to its child, the `sh -c` wrapper, and Node never gets to log; npm exits 1 after 0.68 s (`npm error signal SIGTERM`) instead of hanging until the 10 s kill |
+
+## Next.js app
+
+The app in [`web/`](../web), built by [`.github/workflows/web.yml`](../.github/workflows/web.yml) (CI/CD post 8.2, Deploy post 4.2, the app the Docker post's section 5 containerises).
+
+### Versions
+
+| What | Version |
+| --- | --- |
+| Next.js | 16.4.6 (`next` in [`web/package.json`](../web/package.json), the `latest` dist-tag on 2026-11-22) |
+| React, React DOM | 19.3.0 (what `create-next-app@16.4.6` pins) |
+| TypeScript, ESLint | `^5`, `^9` + `eslint-config-next` 16.4.6 (the create-next-app 16.4.6 template; the API at the root keeps TypeScript 6 and ESLint 10) |
+| Node.js in CI | `node-version: 26`, as the rest of the repo; Next.js 16.4.6 declares `engines.node >= 20.9.0`, so no extra pin |
+
+### `next build` locally
+
+Measured 2026-11-22 in a local terminal (Node 22.23.1, before the first push). Excerpt: the telemetry notice and a warning about the directory above this checkout are left out; every other line is verbatim.
+
+```text
+$ npm run build
+▲ Next.js 16.4.6 (Turbopack)
+  Creating an optimized production build ...
+✓ Compiled successfully in 1975ms
+  Running TypeScript ...
+  Finished TypeScript in 1196ms ...
+✓ Generating static pages using 5 workers (4/4) in 599ms
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ƒ /api/counter
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+$ ls .next/standalone/server.js
+.next/standalone/server.js
+
+$ PORT=3417 node .next/standalone/server.js &
+$ curl -s localhost:3417/api/counter
+{"count":1,"processStartedAt":"2026-11-22T00:36:01.679Z"}
+$ curl -s localhost:3417/api/counter
+{"count":2,"processStartedAt":"2026-11-22T00:36:01.679Z"}
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" localhost:3417/
+HTTP 200
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" localhost:3417/robots.txt
+HTTP 404
+```
+
+`/api/counter` is `ƒ` (dynamic): without `cacheComponents` in `next.config.ts` a `GET` route handler is not prerendered. On one long-running process the count only goes up and `processStartedAt` stays the same; that is exactly why it looks right until it runs on serverless. `robots.txt` is a 404 because `.next/standalone` does not contain `public/` (nor `.next/static/`): the Docker post's section 5 copies both next to it.

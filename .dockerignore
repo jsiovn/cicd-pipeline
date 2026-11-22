@@ -6,3 +6,5 @@ dist
 Dockerfile*
 .dockerignore
 npm-debug.log
+# web/ is the Next.js app, with its own toolchain: keep it out of the API images.
+web
