@@ -1263,7 +1263,7 @@ vercel | rules:  | branch policy: null
 
 - `github-pages` was created by GitHub when Pages was enabled with the `workflow` build type, with one deployment branch policy: `main` (type `branch`), so only runs on `main` may deploy to it (the rule as configured; no run from another branch was tried).
 - `production`: `required_reviewers`, reviewer `User:jsiovn` (the repo owner), `prevent_self_review=false`. With one maintainer, self-review must stay allowed or nobody could approve a run they dispatched. Free plan, public repo: up to 6 reviewers.
-- `vercel`: no rules yet; it holds the Vercel deploy secrets, which a job can read only when it declares `environment: vercel`.
+- `vercel`: no rules and no secrets yet (`gh api repos/jsiovn/cicd-pipeline/environments/vercel/secrets` → `total_count` 0); it is reserved for the Vercel deploy secrets, which a job can read only when it declares `environment: vercel`.
 
 ### Promotion waiting for approval (`release.yml`)
 
