@@ -4,6 +4,9 @@ name: Docker lab
 # and keeps their raw output: job summary + one artifact per job. Not a required check.
 on:
   workflow_dispatch:
+  # Monthly re-run (day 1, 03:57 UTC): the logs and artifacts expire after 90 days.
+  schedule:
+    - cron: "57 3 1 * *"
   push:
     branches: [main]
     paths:

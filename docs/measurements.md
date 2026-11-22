@@ -4,6 +4,51 @@ Numbers the articles quote about this repo: run times, cache hits, image sizes.
 
 Rule: every entry is dated and copied verbatim from a real run (a GitHub Actions log or a local terminal). Nothing here is estimated or rounded by hand. Each entry names the commit it was measured on.
 
+The numbers are frozen at the run each entry names. The monthly scheduled runs (see the README) re-run the workflows and refresh their logs, but they do not rewrite this file: a later run can differ (new base images, new runner), and an entry is replaced only together with its date.
+
+Contents (one section per topic, in the order the measurements were taken):
+
+- [npm cache: miss vs hit](#npm-cache-miss-vs-hit)
+- [PR gate](#pr-gate)
+- [Testing](#testing)
+  - [Regression test: red, then green](#regression-test-red-then-green)
+  - [Coverage gate (`coverage` job)](#coverage-gate-coverage-job)
+  - [Coverage trap (`coverage-trap` job, `examples/coverage-trap/`)](#coverage-trap-coverage-trap-job-examplescoverage-trap)
+  - [Shards (`test-shard` job)](#shards-test-shard-job)
+  - [CI flags (Testing post 8.1)](#ci-flags-testing-post-81)
+  - [Post says / reality](#post-says--reality)
+- [E2E](#e2e)
+  - [Post says / reality (E2E)](#post-says--reality-e2e)
+- [Docker images](#docker-images)
+  - [Sizes](#sizes)
+  - [node_modules](#node_modules)
+  - [docker history of the production image](#docker-history-of-the-production-image)
+  - [Post says / reality (Docker images)](#post-says--reality-docker-images)
+  - [Published image](#published-image)
+- [Docker lab (build-time)](#docker-lab-build-time)
+  - [Layer cache: one-line change, then rebuild (post 1.1, 1.2)](#layer-cache-one-line-change-then-rebuild-post-11-12)
+  - [Build context with and without `.dockerignore` (post 1.3)](#build-context-with-and-without-dockerignore-post-13)
+  - [Base image probes: alpine and distroless (post 3)](#base-image-probes-alpine-and-distroless-post-3)
+  - [Secrets: `ARG` vs secret mount (post 4)](#secrets-arg-vs-secret-mount-post-4)
+  - [dive in CI mode (post 7)](#dive-in-ci-mode-post-7)
+  - [Post says / reality (Docker lab)](#post-says--reality-docker-lab)
+- [Docker lab (runtime)](#docker-lab-runtime)
+  - [Compose dev stack (post 6)](#compose-dev-stack-post-6)
+  - [Volume trap: `node_modules` behind the bind mount (post 6.1)](#volume-trap-node_modules-behind-the-bind-mount-post-61)
+  - [Non-root (post 8.1)](#non-root-post-81)
+  - [`HEALTHCHECK`: time to healthy (post 8.2)](#healthcheck-time-to-healthy-post-82)
+  - [Graceful shutdown: `node` vs `npm start` (post 8.3)](#graceful-shutdown-node-vs-npm-start-post-83)
+  - [Post says / reality (Docker lab, runtime)](#post-says--reality-docker-lab-runtime)
+- [Next.js app](#nextjs-app)
+  - [Versions](#versions)
+  - [`next build` in CI](#next-build-in-ci)
+  - [`next build` locally](#next-build-locally)
+  - [Post says / reality (Next.js app)](#post-says--reality-nextjs-app)
+- [Deploy](#deploy)
+  - [GitHub Pages (`pages.yml`)](#github-pages-pagesyml)
+  - [Environments](#environments)
+  - [Promotion waiting for approval (`release.yml`)](#promotion-waiting-for-approval-releaseyml)
+
 ## npm cache: miss vs hit
 
 Measured 2026-11-21 on commit [`c24a904`](https://github.com/jsiovn/cicd-pipeline/commit/c24a904b7b44fe2e0b9fdbcbd1f8f85c558f83fd) (`ci: let Dependabot bump action pins monthly`), workflow `.github/workflows/ci.yml` with `actions/setup-node@v7` and `cache: npm` in every job.
@@ -379,7 +424,7 @@ Read from the bottom: Debian 13 base 87.7MB, Node runtime 179MB, then this repo'
 
 ### Published image
 
-Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main` (and on a manual run on `main`); pull requests only run `sizes`. Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.
+Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main`, on a manual run on `main` and, since 2026-11-22, on the monthly scheduled run; pull requests only run `sizes`. Set up 2026-11-21 in pull request [#6](https://github.com/jsiovn/cicd-pipeline/pull/6). Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.
 
 ## Docker lab (build-time)
 
