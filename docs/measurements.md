@@ -424,7 +424,7 @@ Read from the bottom: Debian 13 base 87.7MB, Node runtime 179MB, then this repo'
 
 ### Published image
 
-Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main`, on a manual run on `main` and, since 2026-11-22, on the monthly scheduled run; pull requests only run `sizes`. Set up 2026-11-21 in pull request [#6](https://github.com/jsiovn/cicd-pipeline/pull/6). Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.
+Job `publish` of the same workflow pushes the production image (root `Dockerfile`) to `ghcr.io/jsiovn/cicd-pipeline` with the tags `main` and `sha-<short>` on every push to `main`, on a manual run on `main` and on the monthly scheduled run (schedule added 2026-11-22 in pull request [#14](https://github.com/jsiovn/cicd-pipeline/pull/14)); pull requests only run `sizes`. Set up 2026-11-21 in pull request [#6](https://github.com/jsiovn/cicd-pipeline/pull/6). Package page: [github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline](https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline). A GHCR package starts private; until it is made public, `docker pull ghcr.io/jsiovn/cicd-pipeline:main` needs a login with access to it.
 
 ## Docker lab (build-time)
 
