@@ -1119,11 +1119,57 @@ The app in [`web/`](../web), built by [`.github/workflows/web.yml`](../.github/w
 | Next.js | 16.4.6 (`next` in [`web/package.json`](../web/package.json), the `latest` dist-tag on 2026-11-22) |
 | React, React DOM | 19.3.0 (what `create-next-app@16.4.6` pins) |
 | TypeScript, ESLint | `^5`, `^9` + `eslint-config-next` 16.4.6 (the create-next-app 16.4.6 template; the API at the root keeps TypeScript 6 and ESLint 10) |
-| Node.js in CI | `node-version: 26`, as the rest of the repo; Next.js 16.4.6 declares `engines.node >= 20.9.0`, so no extra pin |
+| Node.js in CI | `node-version: 26`, as the rest of the repo (setup-node resolved it to 26.13.1 on 2026-11-22); Next.js 16.4.6 declares `engines.node >= 20.9.0`, so no extra pin |
+
+### `next build` in CI
+
+Measured 2026-11-22 on commit [`d80e773`](https://github.com/jsiovn/cicd-pipeline/commit/d80e7736a5ebd76623f78d01bb44e2bab962fd12) (`fix: pin the Next.js tracing root to web/`), the `pull_request` run of [Actions › Web](https://github.com/jsiovn/cicd-pipeline/actions/workflows/web.yml) for pull request [#9](https://github.com/jsiovn/cicd-pipeline/pull/9), job `build` on `ubuntu-latest`, Node 26.13.1, first run of the app (no `.next/cache`). Step durations from `gh run view <run> --json jobs` (`completedAt - startedAt`, whole seconds as the API reports them).
+
+| Step | Duration |
+| --- | --- |
+| `npm ci` | 9 s |
+| `npm run lint` | 2 s |
+| `npm run typecheck` | 1 s |
+| `npm run build (timed)` | 7 s |
+| whole job `build` | 30 s |
+
+Log of the build step, verbatim:
+
+```text
+> web@0.1.0 build
+> next build
+
+▲ Next.js 16.4.6 (Turbopack)
+✓ Running next.config.ts took 35ms
+⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.7s
+  Running TypeScript ...
+  Finished TypeScript in 1499ms ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/4) ...
+  Generating static pages using 3 workers (1/4) 
+  Generating static pages using 3 workers (2/4) 
+  Generating static pages using 3 workers (3/4) 
+✓ Generating static pages using 3 workers (4/4) in 135ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ƒ /api/counter
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+```
+
+The next step, `test -f .next/standalone/server.js`, passed. On the same pull request `CI` (`ci-ok`), `Image` and `Docker lab` stayed green with `web/` excluded from their toolchain.
 
 ### `next build` locally
 
-Measured 2026-11-22 in a local terminal (Node 22.23.1, before the first push). Excerpt: the telemetry notice and a warning about the directory above this checkout are left out; every other line is verbatim.
+Measured 2026-11-22 in a local terminal (Node 22.23.1, before the first push; the output is the same with `outputFileTracingRoot`). Excerpt: the telemetry notice and a warning about the directory above this checkout are left out; every other line is verbatim.
 
 ```text
 $ npm run build
