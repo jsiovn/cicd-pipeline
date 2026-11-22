@@ -772,3 +772,336 @@ Every inefficient file is in the layers of the base image `node:26-slim` (`apt`/
 | Docker 4.2 | history shows only `$(cat /run/secrets/npm_token)`; a grep for the token finds nothing | identical |
 | Docker 4.2 | the `# syntax=docker/dockerfile:1` line is required ("bắt buộc") for `--mount` | **not required** on Docker 29.4.2 / BuildKit v0.29.0: the same `RUN --mount=type=secret,required=true` builds and reads the secret without it. Recommended: it pins the latest 1.x Dockerfile syntax |
 | Docker 7 | `wagoodman/dive:latest`; `efficiency: 98.7044 %`, `wastedBytes: 5275656 bytes (5.3 MB)`, `userWastedPercent: 2.6348 %`, `Result:PASS [Total:3] [Passed:2] [Failed:0] [Warn:0] [Skipped:1]` | `wagoodman/dive:v0.13.1` (checked by hand on 2026-11-22: Docker Hub lists the same digest, `sha256:f1886e6c…`, for `latest` and `v0.13.1`); `efficiency: 99.3056 %`, `wastedBytes: 3503492 bytes (3.5 MB)`, `userWastedPercent: 1.9817 %`, `Result:PASS [Total:3] [Passed:3] [Failed:0] [Warn:0] [Skipped:0]`. Three rules pass because `.dive-ci` sets all three |
+
+## Docker lab (runtime)
+
+Measured 2026-11-22 (jobs started between 00:08:57 and 00:09:03 UTC) by run `44965193005` of [`.github/workflows/docker-lab.yml`](../.github/workflows/docker-lab.yml) on pull request [#8](https://github.com/jsiovn/cicd-pipeline/pull/8), head commit `d4872a6` (`ci: Docker lab, runtime experiments …`). Same reporting as [Docker lab (build-time)](#docker-lab-build-time): each job runs one script in [`docker/lab/`](../docker/lab) and everything below is copied from the artifacts it uploaded (`lab-compose-up`, `lab-volume-trap`, `lab-non-root`, `lab-healthcheck`, `lab-graceful-shutdown`). Lines starting with `$` are the commands, `#` lines are the script's own notes, `OK:` lines are its assertions, `[exit N]` marks a non-zero exit code. The versions block every script prints first is identical in all five jobs, so it is given once here instead of five times; the only other cut is the layer pull progress of `postgres:19-alpine`, marked where it was.
+
+Runner: `ubuntu-latest`, `Docker server 29.4.2, client 29.4.2`, `Docker Compose version v5.1.3`, `BuildKit version: v0.29.0`. Images: the production image built from [`Dockerfile`](../Dockerfile) (`node:26-slim`, `CMD ["node", "dist/server.js"]`), the dev image built from [`docker/Dockerfile.dev`](../docker/Dockerfile.dev) (`node:26-slim`, Node `v26.13.1`, npm `11.20.0`), `postgres:19-alpine` (`postgres (PostgreSQL) 19.0`, `PGDATA=/var/lib/postgresql/19/docker`, `VOLUME /var/lib/postgresql`).
+
+### Compose dev stack (post 6)
+
+Job `compose-up`, [`docker/lab/compose-up.sh`](../docker/lab/compose-up.sh), on [`compose.yaml`](../compose.yaml). The API's `/healthz` runs `select 1` against Postgres when `DATABASE_URL` is set (only the compose stack sets it) and then adds `"db":"ok"`; without `DATABASE_URL` it answers `{"status":"ok","uptime":<seconds>}` as before. Postgres 18 and later keep their data in `/var/lib/postgresql/<major>/docker` and declare `VOLUME /var/lib/postgresql`, so `compose.yaml` mounts the named volume there; the last part of the job starts `postgres:19-alpine` with the post's mount path, `/var/lib/postgresql/data`, instead.
+
+```text
+$ docker compose version
+Docker Compose version v5.1.3
+
+$ docker compose config --images
+cicd-pipeline-api
+postgres:19-alpine
+
+$ docker compose build api > /home/runner/work/_temp/lab-out/compose-build.log 2>&1
+
+$ docker compose up -d --wait --wait-timeout 180
+ Image postgres:19-alpine Pulling 
+[… 57 lines of layer pull progress omitted …]
+ Image postgres:19-alpine Pulled 
+ Network cicd-pipeline_default Creating 
+ Network cicd-pipeline_default Created 
+ Volume cicd-pipeline_pgdata Creating 
+ Volume cicd-pipeline_pgdata Created 
+ Container cicd-pipeline-db-1 Creating 
+ Container cicd-pipeline-db-1 Created 
+ Container cicd-pipeline-api-1 Creating 
+ Container cicd-pipeline-api-1 Created 
+ Container cicd-pipeline-db-1 Starting 
+ Container cicd-pipeline-db-1 Started 
+ Container cicd-pipeline-db-1 Waiting 
+ Container cicd-pipeline-db-1 Healthy 
+ Container cicd-pipeline-api-1 Starting 
+ Container cicd-pipeline-api-1 Started 
+ Container cicd-pipeline-api-1 Waiting 
+ Container cicd-pipeline-db-1 Waiting 
+ Container cicd-pipeline-api-1 Healthy 
+ Container cicd-pipeline-db-1 Healthy 
+
+$ docker compose ps --format 'table {{.Name}}\t{{.Image}}\t{{.Status}}'
+NAME                  IMAGE                STATUS
+cicd-pipeline-api-1   cicd-pipeline-api    Up Less than a second
+cicd-pipeline-db-1    postgres:19-alpine   Up 6 seconds (healthy)
+
+# right after --wait returns (api has no healthcheck, so --wait only means 'running'):
+$ curl -s localhost:3000/healthz
+{"status":"ok","uptime":0,"db":"ok"}
+
+# poll /healthz once a second until it answers with the database (at most 60 s)
+# answered with db ok after 0.01 s of polling
+$ curl -s localhost:3000/healthz
+{"status":"ok","uptime":0,"db":"ok"}
+
+OK: /healthz answered through compose and the API reached Postgres at host db
+$ docker compose logs --no-log-prefix api
+{"level":30,"time":1795306182671,"pid":31,"hostname":"a0f72c7ddffd","msg":"listening on 3000"}
+
+$ docker compose exec api node --version
+v26.13.1
+
+$ docker compose exec api npm --version
+11.20.0
+
+$ docker compose exec db postgres --version
+postgres (PostgreSQL) 19.0
+
+$ docker compose exec db sh -c 'echo PGDATA=$PGDATA'
+PGDATA=/var/lib/postgresql/19/docker
+
+$ docker image inspect --format '{{json .Config.Volumes}}' postgres:19-alpine
+{"/var/lib/postgresql":{}}
+
+$ docker compose down -v
+ Container cicd-pipeline-api-1 Stopping 
+ Container cicd-pipeline-api-1 Stopped 
+ Container cicd-pipeline-api-1 Removing 
+ Container cicd-pipeline-api-1 Removed 
+ Container cicd-pipeline-db-1 Stopping 
+ Container cicd-pipeline-db-1 Stopped 
+ Container cicd-pipeline-db-1 Removing 
+ Container cicd-pipeline-db-1 Removed 
+ Network cicd-pipeline_default Removing 
+ Volume cicd-pipeline_pgdata Removing 
+ Network cicd-pipeline_default Removed 
+ Volume cicd-pipeline_pgdata Removed 
+
+# ---- the post's volume path, /var/lib/postgresql/data, on postgres:19-alpine ----
+$ docker run -d --name pgprobe -e POSTGRES_PASSWORD=probe -v pgprobe:/var/lib/postgresql/data postgres:19-alpine > /dev/null
+
+$ docker inspect --format 'running={{.State.Running}} exit code={{.State.ExitCode}}' pgprobe
+running=false exit code=1
+
+$ docker logs pgprobe 2>&1 | tail -n 25
+Error: in 18+, these Docker images are configured to store database data in a
+       format which is compatible with "pg_ctlcluster" (specifically, using
+       major-version-specific directory names).  This better reflects how
+       PostgreSQL itself works, and how upgrades are to be performed.
+
+       See also https://github.com/docker-library/postgres/pull/1259
+
+       Counter to that, there appears to be PostgreSQL data in:
+         /var/lib/postgresql/data (unused mount/volume)
+
+       This is usually the result of upgrading the Docker image without
+       upgrading the underlying database using "pg_upgrade" (which requires both
+       versions).
+
+       The suggested container configuration for 18+ is to place a single mount
+       at /var/lib/postgresql which will then place PostgreSQL data in a
+       subdirectory, allowing usage of "pg_upgrade --link" without mount point
+       boundary issues.
+
+       See https://github.com/docker-library/postgres/issues/37 for a (long)
+       discussion around this process, and suggestions for how to do so.
+
+OK: postgres:19-alpine refuses to start with the volume at /var/lib/postgresql/data (running=false exit code=1)
+```
+
+### Volume trap: `node_modules` behind the bind mount (post 6.1)
+
+Job `volume-trap`, [`docker/lab/volume-trap.sh`](../docker/lab/volume-trap.sh). The checkout has no `node_modules` (the job runs no `npm ci`); the two `docker run` commands are the post's, unchanged.
+
+```text
+$ ls -A
+.dive-ci
+.dockerignore
+.editorconfig
+.git
+.gitattributes
+.github
+.gitignore
+.nvmrc
+Dockerfile
+README.md
+compose.yaml
+docker
+docs
+e2e
+eslint.config.js
+examples
+package-lock.json
+package.json
+playwright.config.ts
+src
+tsconfig.build.json
+tsconfig.json
+vitest.config.ts
+
+$ docker build -q -f docker/Dockerfile.dev -t orders-api:dev .
+sha256:e156ee389f3ba00784e0e5a35541457e86f6a67fbc9e2836ba63d18f406015bd
+
+$ docker run --rm orders-api:dev node -e "console.log('in the image, no mounts:', require('fs').readdirSync('/app/node_modules').length, 'entries')"
+in the image, no mounts: 241 entries
+
+# ---- only the bind mount ----
+$ docker run --rm -v $(pwd):/app orders-api:dev \
+    node -e "const fs=require('fs'); console.log(fs.existsSync('/app/node_modules') ? 'present' : 'GONE')"
+GONE
+
+OK: with only -v $(pwd):/app, node_modules is missing inside the container
+# ---- bind mount + anonymous volume on /app/node_modules ----
+$ docker run --rm -v $(pwd):/app -v /app/node_modules orders-api:dev \
+    node -e "console.log('node_modules entries:', require('fs').readdirSync('/app/node_modules').length)"
+node_modules entries: 241
+
+OK: with -v /app/node_modules, the image's node_modules is visible again
+# the anonymous volume left an empty mountpoint in the checkout:
+$ ls -ld node_modules && ls -A node_modules | wc -l
+drwxr-xr-x 2 root root 4096 Nov 22 00:09 node_modules
+0
+```
+
+### Non-root (post 8.1)
+
+Job `non-root`, [`docker/lab/non-root.sh`](../docker/lab/non-root.sh).
+
+```text
+$ docker build -q -t orders-api .
+sha256:35307d845bc6156acb61f85d73bc89cd9ec799971174a6d49c8688368a759f2b
+
+$ docker image inspect --format 'image Config.User: {{.Config.User}}' orders-api
+image Config.User: node
+
+$ docker run -d --name orders-api orders-api
+07ccfc97675a9dae6e11c93102ccc94ae8d48e6d0fb73d253dc235a62b3d0f6b
+
+$ docker exec orders-api whoami
+node
+
+$ docker exec orders-api id
+uid=1000(node) gid=1000(node) groups=1000(node)
+
+$ docker exec orders-api ls -l /app
+total 12
+drwxr-xr-x  4 node node 4096 Nov 22 00:09 dist
+drwxr-xr-x 97 node node 4096 Nov 22 00:09 node_modules
+-rw-r--r--  1 node node 1492 Nov 22 00:08 package.json
+
+# for contrast, the base image without USER:
+$ docker run --rm --entrypoint whoami node:26-slim
+Unable to find image 'node:26-slim' locally
+26-slim: Pulling from library/node
+Digest: sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+Status: Downloaded newer image for node:26-slim
+root
+
+OK: the production container runs as node
+```
+
+### `HEALTHCHECK`: time to healthy (post 8.2)
+
+Job `healthcheck`, [`docker/lab/healthcheck.sh`](../docker/lab/healthcheck.sh). The production image's `HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3`; the script polls the status every 0.5 s.
+
+```text
+$ docker build -q -t orders-api .
+sha256:431e6b765811124bc8ffe21fc92832655d6b1c8465eb5c4a01e651a65807cf24
+
+$ docker image inspect --format '{{json .Config.Healthcheck}}' orders-api
+{"Test":["CMD-SHELL","node -e \"fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""],"Interval":30000000000,"Timeout":3000000000,"StartPeriod":5000000000,"Retries":3}
+
+$ docker run -d --name orders-api -p 3000:3000 orders-api
+7bf8c51db1c25bf69d6fab357c5f277ceb27cc08e72ccf47f5aeb15040ca7c2e
+
+# poll .State.Health.Status every 0.5 s (at most 90 s), print each change
+# t+0.02 s after docker run returned: starting
+# t+5.17 s after docker run returned: healthy
+$ docker inspect --format='{{.State.Health.Status}}' orders-api
+healthy
+
+$ docker inspect --format '{{.State.StartedAt}}' orders-api
+2026-11-22T00:09:07.72495322Z
+
+$ docker inspect --format '{{json .State.Health.Log}}' orders-api | jq -c '.[] | {Start, End, ExitCode, Output}'
+{"Start":"2026-11-22T00:09:13.020088961Z","End":"2026-11-22T00:09:13.104218362Z","ExitCode":0,"Output":""}
+
+$ docker ps --format '{{.Names}}  {{.Status}}'
+orders-api  Up 5 seconds (healthy)
+
+OK: the container reached healthy
+```
+
+The first probe ran 5.3 s after the container started (`StartedAt` 00:09:07.72, first probe `Start` 00:09:13.02), not after the 30 s `--interval`: since Docker Engine 25, probes during the start period run every `--start-interval`, which defaults to 5 s when the Dockerfile does not set it. One passing probe is enough for `healthy`.
+
+### Graceful shutdown: `node` vs `npm start` (post 8.3)
+
+Job `graceful-shutdown`, [`docker/lab/graceful-shutdown.sh`](../docker/lab/graceful-shutdown.sh). Both containers are stopped only after they have logged `listening on 3000` (the `SIGTERM` handler is registered before that line). The second container is the same image with `npm start` as its command, so npm runs `node dist/server.js`.
+
+```text
+$ docker build -q -t orders-api .
+sha256:c44bbaba5973b5dd5266d3c8fac0123ad3ecbfe0f298f83947ead397426baf90
+
+$ docker run --rm orders-api npm --version
+11.20.0
+
+$ docker image inspect --format '{{json .Config.Cmd}}' orders-api
+["node","dist/server.js"]
+
+# ---- CMD ["node", "dist/server.js"] (the image as built) ----
+$ docker run -d --name orders-api orders-api
+0a2cd0df81978df31b6a6479c256af5505776678dbd6a1eb08531d3fb481ad09
+
+$ docker top orders-api -o pid,ppid,args
+PID                 PPID                COMMAND
+3232                3208                node dist/server.js
+
+$ docker stop orders-api
+orders-api
+
+# docker stop took 0.11 s
+$ docker inspect --format '{{.State.ExitCode}}' orders-api
+0
+
+$ docker logs orders-api
+{"level":30,"time":1795306152582,"pid":1,"hostname":"0a2cd0df8197","msg":"listening on 3000"}
+{"level":30,"time":1795306153566,"pid":1,"hostname":"0a2cd0df8197","msg":"SIGTERM received, draining connections"}
+
+OK: node as PID 1: both log lines, exit 0, docker stop took 0.11 s
+# ---- the same image started with npm start ----
+$ docker run -d --name orders-npm orders-api npm start
+5922c457004e1095f0c7ff09b6ead7595ee510edff7b204c5990e47f9f62d325
+
+$ docker top orders-npm -o pid,ppid,args
+PID                 PPID                COMMAND
+3454                3429                npm start
+3506                3454                sh -c node dist/server.js
+3507                3506                node dist/server.js
+
+$ docker stop orders-npm
+orders-npm
+
+# docker stop took 0.68 s
+$ docker inspect --format '{{.State.ExitCode}}' orders-npm
+1
+
+$ docker logs orders-npm
+
+> cicd-pipeline@1.0.0 start
+> node dist/server.js
+
+{"level":30,"time":1795306154309,"pid":20,"hostname":"5922c457004e","msg":"listening on 3000"}
+npm error path /app
+npm error command failed
+npm error signal SIGTERM
+npm error command sh -c node dist/server.js
+npm notice
+npm notice New major version of npm available! 11.20.0 -> 12.2.3
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.3
+npm notice To update run: npm install -g npm@12.2.3
+npm notice
+npm error A complete log of this run can be found in: /home/node/.npm/_logs/2026-11-22T00_09_13_960Z-debug-0.log
+
+OK: npm start: npm exited on SIGTERM without the drain line (exit 1, 0.68 s): not graceful
+```
+
+With `npm start` the process tree is `npm start` (PID 1 in the container) → `sh -c node dist/server.js` → `node dist/server.js`. npm 11.20.0 relays the `SIGTERM` to its child, the `sh -c` wrapper, and reports it killed by that signal (`npm error signal SIGTERM`, `npm error command sh -c node dist/server.js`); Node never logs its drain line, npm exits 1, and Node ends with the container without having run its handler. **The post's claim holds** in effect: with `npm start` the graceful shutdown of 8.3 never runs (no `SIGTERM received` line). The mechanism is not the one the post's wording suggests: the signal is not swallowed until the 10-second kill (exit 137); the container stops in 0.68 s with exit code 1, and the signal stops at the shell npm runs the script with.
+
+### Post says / reality (Docker lab, runtime)
+
+| Post section | Post says (written for Node 24, Postgres 16) | Reality (Node 26, Postgres 19, this run) |
+| --- | --- | --- |
+| Docker 6 | `Dockerfile.dev` on `node:24-slim`, `CMD ["npx", "tsx", "watch", "src/server.ts"]` | same file on `node:26-slim` ([`docker/Dockerfile.dev`](../docker/Dockerfile.dev)); `tsx watch` logs `listening on 3000` |
+| Docker 6 | `postgres:16-alpine` with `pgdata:/var/lib/postgresql/data` | the current major is 19 (`postgres:19-alpine`, PostgreSQL 19.0). On 18+ that mount path **does not work**: the container exits 1 with `Error: in 18+, these Docker images are configured to store database data in a format which is compatible with "pg_ctlcluster"` … `/var/lib/postgresql/data (unused mount/volume)`. The image's own advice, used in [`compose.yaml`](../compose.yaml): one mount at `/var/lib/postgresql`. On `postgres:16-alpine` the post's path is still the right one |
+| Docker 6 | `docker compose up -d` prints `Waiting`, `Healthy`, `Starting`, `Started` for `ordersdemo-*`; then `curl -s localhost:3000/healthz` → `{"status":"ok","uptime":13}` | `docker compose up -d --wait` prints the same four lines for `db`/`api` (project `cicd-pipeline`, named after the directory), and `api` is started only once `db` is `Healthy`. With `--wait` it also prints `api-1 Healthy` although `api` has no healthcheck (for `--wait` that means running). `/healthz` → `{"status":"ok","uptime":0,"db":"ok"}` on the first request; `db` is this repo's addition, the proof that the API reached Postgres at host `db` |
+| Docker 6.1 | bind mount only → `GONE`; with `-v /app/node_modules` → `node_modules entries: 223` | `GONE`, then `node_modules entries: 241` (this repo's dependency tree; the same count as the image without mounts). Side effect the post does not mention: the anonymous volume leaves an empty, root-owned `node_modules` directory in the host checkout |
+| Docker 8.1 | `docker exec orders-api whoami` → `node` | identical; `id` → `uid=1000(node) gid=1000(node) groups=1000(node)`, `/app` owned by `node:node`; the base image without `USER` runs as `root` |
+| Docker 8.2 | `healthy` "after about thirty seconds" (`sau khoảng ba mươi giây`) | `healthy` after **5.17 s**: the first probe runs at the 5 s default `--start-interval` of the start period (Docker Engine 25+), not after the 30 s `--interval` |
+| Docker 8.3 | `docker stop` logs `listening on 3000` and `SIGTERM received, draining connections` | identical two lines; exit code 0; `docker stop` took 0.11 s, far below the 10 s timeout |
+| Docker 8.3 | `npm start` adds a process that does not forward signals to Node, so the shutdown handler never runs | **holds**: no `SIGTERM received` line. But npm does relay `SIGTERM` to its child, the `sh -c` wrapper, and Node never gets to log; npm exits 1 after 0.68 s (`npm error signal SIGTERM`) instead of hanging until the 10 s kill |

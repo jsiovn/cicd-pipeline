@@ -1,7 +1,7 @@
 name: Docker lab
 
-# Re-runs the Docker post's build-time experiments on a clean runner and keeps
-# their raw output: job summary + one artifact per job. Not a required check.
+# Re-runs the Docker post's build-time and runtime experiments on a clean runner
+# and keeps their raw output: job summary + one artifact per job. Not a required check.
 on:
   workflow_dispatch:
   push:
@@ -11,6 +11,8 @@ on:
       - "Dockerfile*"
       - ".dockerignore"
       - ".dive-ci"
+      - "compose.yaml"
+      - "src/server.ts"
       - ".github/workflows/docker-lab.yml"
   pull_request:
     paths:
@@ -18,6 +20,8 @@ on:
       - "Dockerfile*"
       - ".dockerignore"
       - ".dive-ci"
+      - "compose.yaml"
+      - "src/server.ts"
       - ".github/workflows/docker-lab.yml"
 
 permissions:
@@ -100,5 +104,75 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: lab-dive
+          path: ${{ runner.temp }}/lab-out/
+          retention-days: 90
+
+  # Post 6: dev stack from compose.yaml, /healthz through compose, the API queries Postgres.
+  compose-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash docker/lab/compose-up.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-compose-up
+          path: ${{ runner.temp }}/lab-out/
+          retention-days: 90
+
+  # Post 6.1: the bind mount hides node_modules; the anonymous volume brings it back.
+  volume-trap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash docker/lab/volume-trap.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-volume-trap
+          path: ${{ runner.temp }}/lab-out/
+          retention-days: 90
+
+  # Post 8.1: whoami in the production container.
+  non-root:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash docker/lab/non-root.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-non-root
+          path: ${{ runner.temp }}/lab-out/
+          retention-days: 90
+
+  # Post 8.2: time until HEALTHCHECK reports healthy.
+  healthcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash docker/lab/healthcheck.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-healthcheck
+          path: ${{ runner.temp }}/lab-out/
+          retention-days: 90
+
+  # Post 8.3: docker stop on node vs npm start.
+  graceful-shutdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash docker/lab/graceful-shutdown.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-graceful-shutdown
           path: ${{ runner.temp }}/lab-out/
           retention-days: 90

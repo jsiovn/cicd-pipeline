@@ -1,0 +1,36 @@
+# Dev stack of the Docker post (section 6): the API with hot reload, plus Postgres.
+# devpassword is a throwaway local password; never do this in a production compose file.
+services:
+  db:
+    image: postgres:19-alpine
+    environment:
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: orders
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orders"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      # Postgres 18+ keeps its data in /var/lib/postgresql/<major>/docker and declares
+      # VOLUME /var/lib/postgresql; mounting /var/lib/postgresql/data makes it refuse to start.
+      - pgdata:/var/lib/postgresql
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    environment:
+      DATABASE_URL: postgres://postgres:devpassword@db:5432/orders
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  pgdata:
