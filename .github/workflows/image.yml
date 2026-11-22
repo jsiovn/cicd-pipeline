@@ -21,7 +21,8 @@ env:
   IMAGE: ghcr.io/jsiovn/cicd-pipeline
 
 jobs:
-  # Builds all five Dockerfiles and measures them: job summary + sizes.json.
+  # Builds all seven Dockerfiles (five of the API, two of web/) and measures
+  # them: job summary + sizes.json.
   sizes:
     runs-on: ubuntu-latest
     timeout-minutes: 20
