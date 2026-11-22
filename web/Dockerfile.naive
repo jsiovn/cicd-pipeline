@@ -1,0 +1,13 @@
+# The same app without standalone output: the whole node_modules stays in the
+# image and `npm start` runs `next start`. For comparison only.
+#   docker build -f web/Dockerfile.naive -t web:naive web
+FROM node:26
+
+WORKDIR /app
+
+COPY . .
+
+RUN npm install
+RUN npm run build
+
+CMD ["npm", "start"]

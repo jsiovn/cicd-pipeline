@@ -115,7 +115,7 @@ const articles = [
 
 const workflows = [
   ["ci.yml", "CI", "lint, tests on Node 22/24/26, coverage, Playwright smoke test, the required check ci-ok"],
-  ["image.yml", "Image", "five Dockerfiles measured, the production image pushed to GHCR"],
+  ["image.yml", "Image", "seven Dockerfiles measured, the production image pushed to GHCR"],
   ["docker-lab.yml", "Docker lab", "build-time and runtime Docker experiments"],
   ["web.yml", "Web", "the Next.js app in web/, only when web/ changes"],
   ["pages.yml", "Pages", "builds this page and deploys it to GitHub Pages (OIDC)"],
