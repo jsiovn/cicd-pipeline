@@ -7,3 +7,7 @@ test-results/
 .env
 .env.*
 *.log
+# web/ (Next.js). node_modules/ and .vercel/ above already match there too.
+web/.next/
+web/next-env.d.ts
+web/*.tsbuildinfo

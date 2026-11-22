@@ -4,7 +4,8 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default defineConfig(
-  { ignores: ["dist/", "coverage/", "playwright-report/", "test-results/"] },
+  // web/ is the Next.js app: its own package, ESLint config and workflow (web.yml).
+  { ignores: ["dist/", "coverage/", "playwright-report/", "test-results/", "web/"] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

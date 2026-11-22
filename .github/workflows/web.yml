@@ -1,0 +1,55 @@
+name: Web
+
+# The Next.js app in web/: lint, typecheck and build with its own package.json
+# and lockfile. The paths filter runs this workflow only when web/ or this file
+# changes (CI/CD post 8.2).
+#
+# Deliberately NOT a required check. A pull request that does not touch these
+# paths never starts this workflow, so a required "Web" check would stay
+# "Expected — Waiting for status to be reported" forever and block the merge.
+# The ruleset on main requires only ci-ok from ci.yml, which runs on every PR.
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["web/**", ".github/workflows/web.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: npm run build (timed)
+        run: |
+          start=$(date +%s%N)
+          npm run build
+          ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          {
+            echo '### next build'
+            echo "Next.js $(node -p 'require("next/package.json").version'), Node $(node -v): ${ms} ms"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Standalone output has server.js
+        run: test -f .next/standalone/server.js

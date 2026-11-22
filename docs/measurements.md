@@ -482,6 +482,8 @@ What it shows: the naive rebuild re-runs `RUN npm install` (`DONE 3.3s`) because
 
 Job `build-context`, [`docker/lab/build-context.sh`](../docker/lab/build-context.sh), run after `npm ci` so `node_modules` exists. The context is exported exactly as the builder receives it (`FROM scratch`, `COPY . /`, `-o type=local`) and measured with **`du -sh` of the exported directory: that is the figure to quote**. BuildKit's own `transferring context` line (bytes sent to the builder; the builder cache is pruned before each build, so the transfer starts empty) is recorded next to it.
 
+Note (2026-11-22): since the Next.js app was added, `.dockerignore` ends with two more lines, a comment and `web`. The transcript below predates both the app and these lines.
+
 ```text
 $ du -sh node_modules
 181M	node_modules
@@ -1105,3 +1107,106 @@ With `npm start` the process tree is `npm start` (PID 1 in the container) → `s
 | Docker 8.2 | `healthy` "after about thirty seconds" (`sau khoảng ba mươi giây`) | `healthy` after **5.17 s**: the first probe runs at the 5 s default `--start-interval` of the start period (Docker Engine 25+), not after the 30 s `--interval` |
 | Docker 8.3 | `docker stop` logs `listening on 3000` and `SIGTERM received, draining connections` | identical two lines; exit code 0; `docker stop` took 0.11 s, far below the 10 s timeout |
 | Docker 8.3 | `npm start` adds a process that does not forward signals to Node, so the shutdown handler never runs | **holds**: no `SIGTERM received` line. But npm does relay `SIGTERM` to its child, the `sh -c` wrapper, and Node never gets to log; npm exits 1 after 0.68 s (`npm error signal SIGTERM`) instead of hanging until the 10 s kill |
+
+## Next.js app
+
+The app in [`web/`](../web), built by [`.github/workflows/web.yml`](../.github/workflows/web.yml) (CI/CD post 8.2, Deploy post 4.2, the app the Docker post's section 5 containerises).
+
+### Versions
+
+| What | Version |
+| --- | --- |
+| Next.js | 16.4.6 (`next` in [`web/package.json`](../web/package.json), the `latest` dist-tag on 2026-11-22) |
+| React, React DOM | 19.3.0 (what `create-next-app@16.4.6` pins) |
+| TypeScript, ESLint | `^5`, `^9` + `eslint-config-next` 16.4.6 (the create-next-app 16.4.6 template; the API at the root keeps TypeScript 6 and ESLint 10) |
+| Node.js in CI | `node-version: 26`, as the rest of the repo (setup-node resolved it to 26.13.1 on 2026-11-22); Next.js 16.4.6 declares `engines.node >= 20.9.0`, so no extra pin |
+
+### `next build` in CI
+
+Measured 2026-11-22 on commit [`d80e773`](https://github.com/jsiovn/cicd-pipeline/commit/d80e7736a5ebd76623f78d01bb44e2bab962fd12) (`fix: pin the Next.js tracing root to web/`), the `pull_request` run of [Actions › Web](https://github.com/jsiovn/cicd-pipeline/actions/workflows/web.yml) for pull request [#9](https://github.com/jsiovn/cicd-pipeline/pull/9), job `build` on `ubuntu-latest`, Node 26.13.1, first run of the app (no `.next/cache`). Step durations from `gh run view <run> --json jobs` (`completedAt - startedAt`, whole seconds as the API reports them).
+
+| Step | Duration |
+| --- | --- |
+| `npm ci` | 9 s |
+| `npm run lint` | 2 s |
+| `npm run typecheck` | 1 s |
+| `npm run build (timed)` | 7 s |
+| whole job `build` | 30 s |
+
+Log of the build step, verbatim:
+
+```text
+> web@0.1.0 build
+> next build
+
+▲ Next.js 16.4.6 (Turbopack)
+✓ Running next.config.ts took 35ms
+⚠ No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.7s
+  Running TypeScript ...
+  Finished TypeScript in 1499ms ...
+  Collecting page data using 3 workers ...
+  Generating static pages using 3 workers (0/4) ...
+  Generating static pages using 3 workers (1/4) 
+  Generating static pages using 3 workers (2/4) 
+  Generating static pages using 3 workers (3/4) 
+✓ Generating static pages using 3 workers (4/4) in 135ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ƒ /api/counter
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+```
+
+The next step, `test -f .next/standalone/server.js`, passed. On the same pull request `CI` (`ci-ok`), `Image` and `Docker lab` stayed green with `web/` excluded from their toolchain.
+
+### `next build` locally
+
+Measured 2026-11-22 in a local terminal (Node 22.23.1, before the first push; the output is the same with `outputFileTracingRoot`). Excerpt: the telemetry notice and a warning about the directory above this checkout are left out; every other line is verbatim.
+
+```text
+$ npm run build
+▲ Next.js 16.4.6 (Turbopack)
+  Creating an optimized production build ...
+✓ Compiled successfully in 1975ms
+  Running TypeScript ...
+  Finished TypeScript in 1196ms ...
+✓ Generating static pages using 5 workers (4/4) in 599ms
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ƒ /api/counter
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+$ ls .next/standalone/server.js
+.next/standalone/server.js
+
+$ PORT=3417 node .next/standalone/server.js &
+$ curl -s localhost:3417/api/counter
+{"count":1,"processStartedAt":"2026-11-22T00:36:01.679Z"}
+$ curl -s localhost:3417/api/counter
+{"count":2,"processStartedAt":"2026-11-22T00:36:01.679Z"}
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" localhost:3417/
+HTTP 200
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" localhost:3417/robots.txt
+HTTP 404
+```
+
+`/api/counter` is `ƒ` (dynamic): without `cacheComponents` in `next.config.ts` a `GET` route handler is not prerendered. On one long-running process the count only goes up and `processStartedAt` stays the same; that is exactly why it looks right until it runs on serverless. `robots.txt` is a 404 because `.next/standalone` does not contain `public/` (nor `.next/static/`): the Docker post's section 5 copies both next to it.
+
+### Post says / reality (Next.js app)
+
+| Post section | Post says | Reality (this repo) |
+| --- | --- | --- |
+| Docker 5 | `next.config.ts` with only `output: "standalone"`; `next build` puts `server.js` in `.next/standalone` | true for an app at the root of its repository. Here `web/` sits next to the API's `package-lock.json`, and the first CI run of this app failed `test -f .next/standalone/server.js`: `next build` warned `Next.js inferred your workspace root, but it may not be correct. We detected multiple lockfiles and selected the directory of /home/runner/work/cicd-pipeline/cicd-pipeline/package-lock.json as the root directory.` and wrote `.next/standalone/web/server.js`. One more line in [`web/next.config.ts`](../web/next.config.ts), `outputFileTracingRoot: __dirname`, brings it back to `.next/standalone/server.js` and silences the warning |
+| Docker 5 | an app on Next.js 16.2.10 | Next.js 16.4.6 |
