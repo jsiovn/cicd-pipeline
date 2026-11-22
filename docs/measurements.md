@@ -1210,3 +1210,67 @@ HTTP 404
 | --- | --- | --- |
 | Docker 5 | `next.config.ts` with only `output: "standalone"`; `next build` puts `server.js` in `.next/standalone` | true for an app at the root of its repository. Here `web/` sits next to the API's `package-lock.json`, and the first CI run of this app failed `test -f .next/standalone/server.js`: `next build` warned `Next.js inferred your workspace root, but it may not be correct. We detected multiple lockfiles and selected the directory of /home/runner/work/cicd-pipeline/cicd-pipeline/package-lock.json as the root directory.` and wrote `.next/standalone/web/server.js`. One more line in [`web/next.config.ts`](../web/next.config.ts), `outputFileTracingRoot: __dirname`, brings it back to `.next/standalone/server.js` and silences the warning |
 | Docker 5 | an app on Next.js 16.2.10 | Next.js 16.4.6 |
+
+## Deploy
+
+GitHub Pages site and the approval-gated promotion (CI/CD post 5.2, 6.1, 6.2, 7.1; Deploy post 3, 6). Set up 2026-11-22 through the REST API: `gh api -X POST repos/jsiovn/cicd-pipeline/pages -f build_type=workflow`, `gh api -X PUT repos/jsiovn/cicd-pipeline/environments/production --input <file>` (body `{"prevent_self_review": false, "reviewers": [{"type": "User", "id": <owner id>}]}`), `gh api -X PUT repos/jsiovn/cicd-pipeline/environments/vercel` (no body).
+
+### GitHub Pages (`pages.yml`)
+
+Site: **https://jsiovn.github.io/cicd-pipeline/** (`gh api repos/jsiovn/cicd-pipeline/pages`: `build_type` `workflow`, `https_enforced` `true`). `curl -s -o /dev/null -w "%{http_code}" https://jsiovn.github.io/cicd-pipeline/` printed `200` on 2026-11-22 after the first deployment.
+
+Measured 2026-11-22 on commit [`3ce4c8e`](https://github.com/jsiovn/cicd-pipeline/commit/3ce4c8ed35b21997caec63546e0b094d0e6da4eb) (`ci: deploy a static site to GitHub Pages (OIDC) and gate the production promotion (#10)`), the first run of [Actions › Pages](https://github.com/jsiovn/cicd-pipeline/actions/workflows/pages.yml) on `main` (event `push`, runner image `ubuntu-26.04`). Durations from `gh run view <run> --json jobs` (`completedAt - startedAt`, whole seconds as the API reports them).
+
+| Job / step | Duration |
+| --- | --- |
+| job `build` | 12 s (03:57:53Z → 03:58:05Z) |
+| `actions/setup-node@v7` (Node 26) | 5 s |
+| `Build the site` (`node scripts/build-site.mjs`) | 0 s |
+| `Upload Pages artifact` | 1 s |
+| job `deploy` | 8 s (03:58:09Z → 03:58:17Z) |
+| `Deploy to GitHub Pages` | 6 s |
+| run wall clock (`run_started_at` → `updated_at`) | 26 s (03:57:51Z → 03:58:17Z) |
+
+Log of the build step: `build-site: wrote _site/index.html (8146 bytes)`.
+
+Log of the `deploy` job, verbatim (timestamp prefixes removed; the action's input echo and a Node `punycode` deprecation warning left out). The `GITHUB_TOKEN` permissions the job prints are only `Metadata: read` and `Pages: write`: `id-token: write` is not a token permission, it lets the job request an OIDC token, which the action sends as `oidc_token` (masked):
+
+```text
+Fetching artifact metadata for "github-pages" in this workflow run
+Found 1 artifact(s)
+Creating Pages deployment with payload:
+{
+	"artifact_id": 14738611161,
+	"pages_build_version": "3ce4c8ed35b21997caec63546e0b094d0e6da4eb",
+	"oidc_token": "***"
+}
+Created deployment for 3ce4c8ed35b21997caec63546e0b094d0e6da4eb, ID: 3ce4c8ed35b21997caec63546e0b094d0e6da4eb
+Getting Pages deployment status...
+Reported success!
+Evaluate and set environment url
+Evaluated environment url: https://jsiovn.github.io/cicd-pipeline/
+```
+
+### Environments
+
+`gh api repos/jsiovn/cicd-pipeline/environments --jq '.environments[] | "\(.name) | rules: \([.protection_rules[].type] | join(",")) | branch policy: \(.deployment_branch_policy)"'`, 2026-11-22:
+
+```text
+github-pages | rules: branch_policy | branch policy: {"custom_branch_policies":true,"protected_branches":false}
+production | rules: required_reviewers | branch policy: null
+vercel | rules:  | branch policy: null
+```
+
+- `github-pages` was created by GitHub when Pages was enabled with the `workflow` build type, with one deployment branch policy: `main` (type `branch`), so only runs on `main` may deploy to it (the rule as configured; no run from another branch was tried).
+- `production`: `required_reviewers`, reviewer `User:jsiovn` (the repo owner), `prevent_self_review=false`. With one maintainer, self-review must stay allowed or nobody could approve a run they dispatched. Free plan, public repo: up to 6 reviewers.
+- `vercel`: no rules yet; it holds the Vercel deploy secrets, which a job can read only when it declares `environment: vercel`.
+
+### Promotion waiting for approval (`release.yml`)
+
+`release.yml` was dispatched once from `main` on 2026-11-22 (`gh workflow run release.yml --repo jsiovn/cicd-pipeline --ref main`). `gh run list --repo jsiovn/cicd-pipeline --workflow release.yml --limit 1 --json status,event,headBranch` a few seconds later:
+
+```text
+[{"event":"workflow_dispatch","headBranch":"main","status":"waiting"}]
+```
+
+`gh api repos/jsiovn/cicd-pipeline/actions/runs/<run>/pending_deployments`: environment `production`, `wait_timer` 0, reviewers `jsiovn`, `current_user_can_approve` `true`. Until someone approves, the `promote` job does not start, so the re-tag to `:production` has not run.
