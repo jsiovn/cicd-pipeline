@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Monthly re-run (day 1, 03:17 UTC): run logs expire after 90 days, so a
+  # scheduled run keeps a recent one to open. The three schedules are staggered.
+  schedule:
+    - cron: "17 3 1 * *"
 
 permissions:
   contents: read
