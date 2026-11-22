@@ -1,6 +1,7 @@
 import express from "express";
 import type { Logger } from "pino";
 import { checkoutPage } from "./checkout-page.js";
+import type { DbCheck } from "./db.js";
 import { cartTotal, shippingFee, type LineItem } from "./pricing/index.js";
 
 interface OrderRequest {
@@ -9,12 +10,23 @@ interface OrderRequest {
   isExpress?: boolean;
 }
 
-export function createApp(logger: Logger) {
+export function createApp(logger: Logger, checkDb?: DbCheck) {
   const app = express();
   app.use(express.json());
 
-  app.get("/healthz", (_req, res) => {
-    res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
+  app.get("/healthz", async (_req, res) => {
+    const uptime = Math.floor(process.uptime());
+    if (!checkDb) {
+      res.json({ status: "ok", uptime });
+      return;
+    }
+    try {
+      await checkDb();
+      res.json({ status: "ok", uptime, db: "ok" });
+    } catch (error) {
+      logger.error(error, "database check failed");
+      res.status(503).json({ status: "error", uptime, db: "unreachable" });
+    }
   });
 
   app.get("/checkout", (_req, res) => {

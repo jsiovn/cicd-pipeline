@@ -67,3 +67,18 @@ finish() {
     echo '```'
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 }
+
+# Runtime experiments: wait until a container has logged a line (the SIGTERM
+# handler is registered before "listening on", so stopping earlier proves nothing).
+wait_for_log() { # container pattern [seconds]
+  local i
+  for i in $(seq 1 "${3:-30}"); do
+    if docker logs "$1" 2>&1 | grep -q "$2"; then return 0; fi
+    sleep 1
+  done
+  fail "$1 did not log '$2' within ${3:-30} s"
+}
+
+seconds_since() { # start (from date +%s.%N): seconds elapsed, two decimals
+  awk -v a="$1" -v b="$(date +%s.%N)" 'BEGIN { printf "%.2f", b - a }'
+}
