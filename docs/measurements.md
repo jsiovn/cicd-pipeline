@@ -1157,3 +1157,10 @@ HTTP 404
 ```
 
 `/api/counter` is `ƒ` (dynamic): without `cacheComponents` in `next.config.ts` a `GET` route handler is not prerendered. On one long-running process the count only goes up and `processStartedAt` stays the same; that is exactly why it looks right until it runs on serverless. `robots.txt` is a 404 because `.next/standalone` does not contain `public/` (nor `.next/static/`): the Docker post's section 5 copies both next to it.
+
+### Post says / reality (Next.js app)
+
+| Post section | Post says | Reality (this repo) |
+| --- | --- | --- |
+| Docker 5 | `next.config.ts` with only `output: "standalone"`; `next build` puts `server.js` in `.next/standalone` | true for an app at the root of its repository. Here `web/` sits next to the API's `package-lock.json`, and the first CI run of this app failed `test -f .next/standalone/server.js`: `next build` warned `Next.js inferred your workspace root, but it may not be correct. We detected multiple lockfiles and selected the directory of /home/runner/work/cicd-pipeline/cicd-pipeline/package-lock.json as the root directory.` and wrote `.next/standalone/web/server.js`. One more line in [`web/next.config.ts`](../web/next.config.ts), `outputFileTracingRoot: __dirname`, brings it back to `.next/standalone/server.js` and silences the warning |
+| Docker 5 | an app on Next.js 16.2.10 | Next.js 16.4.6 |

@@ -24,7 +24,7 @@ It backs these articles on [JavaScript.io.vn](https://javascript.io.vn/) (in Vie
 | `src/cart/` | `fetchCart()`: loads the cart from `https://api.example.com/cart` with the global `fetch`; its test intercepts the request with MSW |
 | `examples/coverage-trap/` | The Testing post's coverage demo, with its own Vitest config (not part of `npm test`) |
 | `compose.yaml`, `docker/Dockerfile.dev` | The dev stack: the API with `tsx watch` and a bind mount, plus Postgres 19 (`docker compose up -d --wait`, then `curl -s localhost:3000/healthz`) |
-| `web/` | A separate Next.js 16 app (its own `package.json` and lockfile, not an npm workspace; built by [`web.yml`](.github/workflows/web.yml), ignored by the API's ESLint, TypeScript, Vitest and Docker build context): one page, `output: "standalone"` in `web/next.config.ts`, and `GET /api/counter`, a module-scope counter that is **deliberately wrong** on serverless |
+| `web/` | A separate Next.js 16 app (its own `package.json` and lockfile, not an npm workspace; built by [`web.yml`](.github/workflows/web.yml), ignored by the API's ESLint, TypeScript, Vitest and Docker build context): one page, `output: "standalone"` in `web/next.config.ts` (plus `outputFileTracingRoot`, so `server.js` lands at `.next/standalone/server.js` next to the root lockfile), and `GET /api/counter`, a module-scope counter that is **deliberately wrong** on serverless |
 
 ```sh
 nvm use            # Node 26 (.nvmrc); Node 22 and 24 are supported too
