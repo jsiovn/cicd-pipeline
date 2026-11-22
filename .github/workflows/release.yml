@@ -34,8 +34,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # Re-tag in the registry: no rebuild, :production gets the exact digest
-      # of :main. Rolling back is the same command with an older tag (sha-<short>)
-      # as the source.
+      # of :main at the moment the run is approved. Rolling back (an older
+      # sha-<short> tag as the source) is not part of this workflow.
       - name: Tag :main as :production
         run: docker buildx imagetools create --tag "$IMAGE:production" "$IMAGE:main"
       - name: docker buildx imagetools inspect
