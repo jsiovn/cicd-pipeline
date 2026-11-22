@@ -1,0 +1,42 @@
+name: Release
+
+# Promotes the image that main published (ghcr.io/jsiovn/cicd-pipeline:main)
+# to :production. Started by hand only, and the job waits in the `production`
+# environment until a required reviewer approves it (Settings -> Environments
+# -> production -> Required reviewers).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/jsiovn/cicd-pipeline
+
+jobs:
+  promote:
+    # A dispatch from any other branch is skipped, not run.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://github.com/jsiovn/cicd-pipeline/pkgs/container/cicd-pipeline
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Re-tag in the registry: no rebuild, :production gets the exact digest
+      # of :main. Rolling back is the same command with an older tag (sha-<short>)
+      # as the source.
+      - name: Tag :main as :production
+        run: docker buildx imagetools create --tag "$IMAGE:production" "$IMAGE:main"
+      - name: docker buildx imagetools inspect
+        run: docker buildx imagetools inspect "$IMAGE:production"

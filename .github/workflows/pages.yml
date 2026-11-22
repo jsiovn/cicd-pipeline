@@ -1,0 +1,54 @@
+name: Pages
+
+# The public twin of a real production workflow: build a static site, then
+# deploy it to GitHub Pages. Same two-job shape: `build` uploads the site as an
+# artifact, `deploy` publishes it. Only a push to main starts it, so it needs
+# no `if: github.ref == ...`. No approval on this path.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer push waits instead of cancelling a
+# deployment halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # docs/measurements.md -> _site/index.html (no dependencies, no npm ci)
+      - name: Build the site
+        run: node scripts/build-site.mjs
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  # The only job with write access. `id-token: write` lets actions/deploy-pages
+  # request an OIDC token, which GitHub Pages exchanges for the deployment:
+  # no long-lived key is stored anywhere.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
