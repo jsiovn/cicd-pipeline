@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig(
   // web/ is the Next.js app: its own package, ESLint config and workflow (web.yml).
-  { ignores: ["dist/", "coverage/", "playwright-report/", "test-results/", "web/"] },
+  { ignores: ["dist/", "coverage/", "playwright-report/", "test-results/", "_site/", "web/"] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {
